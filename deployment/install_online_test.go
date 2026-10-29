@@ -31,18 +31,20 @@ func TestOnlineInstaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(content))
-	gh := `#!/bin/bash
-case "$1 $2" in
-  "release view")
-    if [[ "$*" == *"--json tagName"* ]]; then echo v0.1.1; else printf '%s\n' "$XUI_FAKE_DIGEST"; fi ;;
-  "release download")
-    while [[ $# -gt 0 ]]; do if [[ $1 == --dir ]]; then dest=$2; shift 2; else shift; fi; done
-    cp -- "$XUI_FAKE_ARCHIVE" "$dest/$XUI_RELEASE_ASSET" ;;
-  *) exit 1 ;;
-esac
+	digest := fmt.Sprintf("%x", sha256.Sum256(content))
+	curl := `#!/bin/bash
+url=${@: -1}
+while [[ $# -gt 0 ]]; do
+  if [[ $1 == -o ]]; then dest=$2; shift 2; else shift; fi
+done
+name=${url##*/}
+if [[ $name == *.sha256 ]]; then
+  printf '%s  %s\n' "$XUI_FAKE_DIGEST" "${name%.sha256}" > "$dest"
+else
+  cp -- "$XUI_FAKE_ARCHIVE" "$dest"
+fi
 `
-	for name, data := range map[string]string{"gh": gh, "sudo": "#!/bin/sh\nexec \"$@\"\n"} {
+	for name, data := range map[string]string{"curl": curl, "sudo": "#!/bin/sh\nexec \"$@\"\n"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(data), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +63,7 @@ esac
 		{"default install", nil, digest, true, true, "2053"},
 		{"custom port", []string{"--port", "9443", "--version", "v0.1.1"}, digest, true, true, "9443"},
 		{"download only", []string{"--download-only"}, digest, true, false, ""},
-		{"checksum mismatch", nil, "sha256:" + strings.Repeat("0", 64), false, false, ""},
+		{"checksum mismatch", nil, strings.Repeat("0", 64), false, false, ""},
 		{"invalid port", []string{"--port", "65536"}, digest, false, false, ""},
 		{"invalid version", []string{"--version", "../../bad"}, digest, false, false, ""},
 	} {

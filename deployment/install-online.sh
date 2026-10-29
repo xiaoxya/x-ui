@@ -37,7 +37,7 @@ case "$(uname -m)" in
     aarch64|arm64) arch=arm64 ;;
     *) printf '不支持当前 CPU 架构。\n' >&2; exit 1 ;;
 esac
-for program in gh sha256sum tar mktemp; do
+for program in curl sha256sum tar mktemp; do
     if ! command -v "$program" >/dev/null; then
         printf '缺少命令：%s，请先安装。\n' "$program" >&2
         exit 1
@@ -47,28 +47,28 @@ if (( ! download_only )) && (( EUID != 0 )) && ! command -v sudo >/dev/null; the
     printf '安装需要 root 权限，请安装 sudo 或使用 root。\n' >&2
     exit 1
 fi
-repository='xiaoxya/x-ui'
-if [[ -z $version ]]; then
-    version=$(gh release view --repo "$repository" --json tagName --jq '.tagName')
-fi
-if [[ ! $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-    printf '无法获取有效的发行版本。\n' >&2
-    exit 1
-fi
 asset="x-ui-linux-$arch.tar.gz"
-export XUI_RELEASE_ASSET="$asset"
-digest=$(gh release view "$version" --repo "$repository" --json assets --jq '.assets[] | select(.name == env.XUI_RELEASE_ASSET) | .digest')
-if [[ ! $digest =~ ^sha256:[a-f0-9]{64}$ ]]; then
-    printf '无法获取安装包的 SHA-256 校验值。\n' >&2
-    exit 1
+release_url='https://github.com/xiaoxya/x-ui/releases/latest/download'
+if [[ -n $version ]]; then
+    release_url="https://github.com/xiaoxya/x-ui/releases/download/$version"
 fi
 umask 077
 save_dir=${XUI_INSTALLER_DIR:-"${HOME:?未设置 HOME}/xui-installers"}
 mkdir -p -- "$save_dir"
 work_dir=$(mktemp -d "$save_dir/xui-XXXXXXXX")
-printf '正在下载 %s（%s）到 %s\n' "$version" "$arch" "$work_dir"
-gh release download "$version" --repo "$repository" --pattern "$asset" --dir "$work_dir"
-printf '%s  %s\n' "${digest#sha256:}" "$work_dir/$asset" | sha256sum -c -
+printf '正在下载 %s（%s）到 %s\n' "${version:-最新正式发行版}" "$arch" "$work_dir"
+curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 600 --retry 2 -o "$work_dir/$asset.sha256" "$release_url/$asset.sha256"
+curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 600 --retry 2 -o "$work_dir/$asset" "$release_url/$asset"
+if (( $(wc -c < "$work_dir/$asset.sha256") > 4096 )); then
+    printf '校验文件过大。\n' >&2
+    exit 1
+fi
+mapfile -t checksums < "$work_dir/$asset.sha256"
+if (( ${#checksums[@]} != 1 )) || [[ ${#checksums[0]} -ne $((64 + 2 + ${#asset})) || ${checksums[0]:64} != "  $asset" || ! ${checksums[0]:0:64} =~ ^[a-f0-9]{64}$ ]]; then
+    printf '校验文件格式无效。\n' >&2
+    exit 1
+fi
+printf '%s  %s\n' "${checksums[0]:0:64}" "$work_dir/$asset" | sha256sum -c -
 tar -xzf "$work_dir/$asset" -C "$work_dir" --no-same-owner --no-same-permissions
 installer="$work_dir/xui-package/install.sh"
 if [[ ! -f $installer || ! -x $installer || -L $installer ]]; then
