@@ -4,7 +4,9 @@
 
 ### 下载 GitHub 构建包
 
-在仓库的 **Actions → Build installation packages** 中打开成功的运行记录，下载与服务器架构匹配的 `x-ui-linux-amd64` 或 `x-ui-linux-arm64` 产物。产物保留 30 天；私有仓库需要有访问权限的账号登录下载。解压下载得到的 ZIP 后，验证并解压其中的安装包，例如 AMD64：
+在仓库的 **Releases** 页面下载与服务器架构匹配的安装包及 `.sha256` 校验文件。推送版本标签（例如 `v1.0.0`）后，工作流会自动构建、验证并发布 AMD64 和 ARM64 安装包。私有仓库需要有访问权限的账号登录下载。
+
+以下以 AMD64 包为例，在安装包和校验文件所在目录执行：
 
 ```bash
 sha256sum -c x-ui-linux-amd64.tar.gz.sha256
