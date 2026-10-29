@@ -7,13 +7,13 @@
 目标服务器需运行 Linux 和 systemd，并安装 `curl`、`tar`、`sha256sum` 和 `sudo`。执行以下命令自动识别架构、下载最新发行版、校验并安装；服务器不需要 Go 或 GitHub 登录。
 
 ```bash
-( set -o pipefail; curl -fsSL https://raw.githubusercontent.com/xiaoxya/x-ui/main/deployment/install-online.sh | bash )
+curl -fsSL https://raw.githubusercontent.com/xiaoxya/x-ui/main/deployment/install-online.sh | bash
 ```
 
 默认端口为 `2053`。要指定端口，例如 `8080`：
 
 ```bash
-( set -o pipefail; curl -fsSL https://raw.githubusercontent.com/xiaoxya/x-ui/main/deployment/install-online.sh | bash -s -- --port 8080 )
+curl -fsSL https://raw.githubusercontent.com/xiaoxya/x-ui/main/deployment/install-online.sh | bash -s -- --port 8080
 ```
 
 安装包保存在当前用户的 `~/xui-installers/`，请保留该目录以便安装中断时恢复。可传入 `--download-only` 仅下载和校验，或使用 `--version v0.1.1` 指定发行版。下载后运行脚本会安装软件，请确认来源可信。安装包及校验文件均由 GitHub 发布，SHA-256 检查可检测下载错误，并非独立签名验证。
