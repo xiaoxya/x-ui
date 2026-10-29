@@ -71,7 +71,11 @@ jobs:
       - name: Verify package startup
         env:
           XUI_PACKAGE_TEST_DIR: ${{ runner.temp }}/xui-package
-        run: go test ./deployment -run '^TestLocalPackageBoot$' -count=1 -v
+        run: |
+          test -x "$XUI_PACKAGE_TEST_DIR/install.sh"
+          go test ./cmd/xui-upgrade -run '^(TestValidateBuiltPackage|TestInstallRealPackageWithIsolatedSystemd)$' -count=1 -v
+          go test ./deployment -run '^TestLocalPackageBoot$' -count=1 -v
+          go test ./cmd/xui-upgrade -run '^TestValidateBuiltPackage$' -count=1 -v
       - name: Archive package
         env:
           PACKAGE_ARCH: ${{ matrix.arch }}

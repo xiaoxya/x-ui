@@ -29,6 +29,13 @@ func TestLocalPackageBoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Starting Xray writes bin/config.json. Run from a private copy so the
+	// tested package remains byte-for-byte identical to what is released.
+	copyDir := filepath.Join(t.TempDir(), "package")
+	if output, err := exec.Command("cp", "-a", packageDir, copyDir).CombinedOutput(); err != nil {
+		t.Fatalf("copy package for smoke test: %v %s", err, output)
+	}
+	packageDir = copyDir
 	dbDir := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

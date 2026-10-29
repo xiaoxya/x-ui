@@ -41,9 +41,10 @@ for name in geoip.dat geosite.dat geoip_IR.dat geosite_IR.dat; do
 done
 cp -- "$root/x-ui.sh" "$root/x-ui.service" "$root/LICENSE" "$root/CLOUDFLARE_TUNNEL.md" "$root/PORTHOP.md" "$output/"
 cp -- "$root/deployment/manage-local.sh" "$output/xui-manage-local"
-chmod 0755 "$output/x-ui.sh" "$output/xui-manage-local"
+cp -- "$root/deployment/install-package.sh" "$output/install.sh"
+chmod 0755 "$output/x-ui.sh" "$output/xui-manage-local" "$output/install.sh"
 printf '%s\n' "$version" > "$output/XRAY_VERSION.txt"
-files=(x-ui x-ui.sh x-ui.service xui-porthop xui-db-snapshot xui-upgrade xui-manage-local LICENSE CLOUDFLARE_TUNNEL.md PORTHOP.md XRAY_VERSION.txt "bin/xray-linux-$arch" bin/geoip.dat bin/geosite.dat)
+files=(install.sh x-ui x-ui.sh x-ui.service xui-porthop xui-db-snapshot xui-upgrade xui-manage-local LICENSE CLOUDFLARE_TUNNEL.md PORTHOP.md XRAY_VERSION.txt "bin/xray-linux-$arch" bin/geoip.dat bin/geosite.dat)
 for name in bin/geoip_IR.dat bin/geosite_IR.dat; do
     if [[ -f "$output/$name" ]]; then files+=("$name"); fi
 done

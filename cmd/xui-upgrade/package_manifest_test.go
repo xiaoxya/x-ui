@@ -13,13 +13,16 @@ import (
 )
 
 func TestPackageManifestRejectsChangedMissingAndExtraFiles(t *testing.T) {
-	for _, mode := range []string{"valid", "changed", "missing", "extra", "duplicate", "traversal"} {
+	for _, mode := range []string{"valid", "installer-valid", "installer-changed", "changed", "missing", "extra", "duplicate", "traversal"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			if err := os.Mkdir(filepath.Join(dir, "bin"), 0700); err != nil {
 				t.Fatal(err)
 			}
 			files := []string{"x-ui", "x-ui.sh", "x-ui.service", "xui-porthop", "xui-db-snapshot", "xui-upgrade", "xui-manage-local", "LICENSE", "CLOUDFLARE_TUNNEL.md", "PORTHOP.md", "XRAY_VERSION.txt", "bin/xray-linux-" + runtime.GOARCH, "bin/geoip.dat", "bin/geosite.dat"}
+			if mode == "installer-valid" || mode == "installer-changed" {
+				files = append(files, "install.sh")
+			}
 			var manifest strings.Builder
 			for _, name := range files {
 				data := []byte("test:" + name)
@@ -30,6 +33,10 @@ func TestPackageManifestRejectsChangedMissingAndExtraFiles(t *testing.T) {
 				fmt.Fprintf(&manifest, "%x  %s\n", sum, name)
 			}
 			switch mode {
+			case "installer-changed":
+				if err := os.WriteFile(filepath.Join(dir, "install.sh"), []byte("modified"), 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "changed":
 				if err := os.WriteFile(filepath.Join(dir, "x-ui"), []byte("replaced"), 0600); err != nil {
 					t.Fatal(err)
@@ -53,7 +60,7 @@ func TestPackageManifestRejectsChangedMissingAndExtraFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := verifyPackageManifest(dir)
-			if (err != nil) != (mode != "valid") {
+			if (err != nil) != (mode != "valid" && mode != "installer-valid") {
 				t.Fatalf("unexpected result: %v", err)
 			}
 		})

@@ -90,3 +90,62 @@ func TestInstallerLocalEntry(t *testing.T) {
 		t.Fatalf("arguments %q, want %q", args, want)
 	}
 }
+
+func TestPackageInstaller(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "package with spaces")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("install-package.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(dir, "install.sh")
+	if err = os.WriteFile(installer, data, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$XUI_TEST_ARG_LOG\"\nexit \"${XUI_TEST_EXIT:-0}\"\n"
+	if err = os.WriteFile(filepath.Join(dir, "xui-upgrade"), []byte(fake), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		port string
+		exit string
+		ok   bool
+	}{
+		{"default", nil, "2053", "0", true}, {"custom", []string{"23456"}, "23456", "0", true},
+		{"zero", []string{"0"}, "", "0", false}, {"out of range", []string{"65536"}, "", "0", false},
+		{"invalid", []string{"abc"}, "", "0", false}, {"extra", []string{"123", "456"}, "", "0", false},
+		{"failure propagated", nil, "2053", "37", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "args")
+			cmd := exec.Command("bash", append([]string{installer}, tc.args...)...)
+			cmd.Dir = t.TempDir()
+			cmd.Env = append(os.Environ(), "XUI_TEST_ARG_LOG="+log, "XUI_TEST_EXIT="+tc.exit)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.ok {
+				t.Fatalf("unexpected result: %v: %s", err, out)
+			}
+			if tc.port == "" {
+				if _, err := os.Stat(log); !os.IsNotExist(err) {
+					t.Fatal("invalid input reached installer")
+				}
+				return
+			}
+			got, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"-install", "-package", dir, "-port", tc.port}
+			if args := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n"); !reflect.DeepEqual(args, want) {
+				t.Fatalf("arguments %q, want %q", args, want)
+			}
+			if tc.exit == "37" && cmd.ProcessState.ExitCode() != 37 {
+				t.Fatalf("exit code %d", cmd.ProcessState.ExitCode())
+			}
+		})
+	}
+}

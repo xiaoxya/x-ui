@@ -11,7 +11,7 @@
 ```bash
 sha256sum -c x-ui-linux-amd64.tar.gz.sha256
 tar -xzf x-ui-linux-amd64.tar.gz
-sudo ./xui-package/xui-upgrade -install -package "$(pwd)/xui-package" -port 2053
+sudo ./xui-package/install.sh 2053
 sudo cat /etc/x-ui/initial-credentials
 ```
 
@@ -43,11 +43,10 @@ sudo cat /etc/x-ui/initial-credentials
 3. 在目标服务器上安装。下面以包所在位置 `/home/user/xui-package` 和面板端口 `2053` 为例：
 
    ```bash
-   sudo /home/user/xui-package/xui-upgrade \
-     -install -package /home/user/xui-package -port 2053
+   sudo /home/user/xui-package/install.sh 2053
    ```
 
-   安装会拒绝覆盖已有的面板、数据库、管理命令或同名 systemd 服务。请按需在服务器防火墙和云平台安全组放行面板 TCP 端口。
+   不指定端口时默认使用 `2053`。安装会拒绝覆盖已有的面板、数据库、管理命令或同名 systemd 服务。请按需在服务器防火墙和云平台安全组放行面板 TCP 端口。
 
 4. 查看随机生成的登录凭据和访问路径：
 

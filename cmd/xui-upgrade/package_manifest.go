@@ -24,6 +24,8 @@ func verifyPackageManifest(dir string) error {
 	for _, name := range required {
 		allowed[name] = true
 	}
+	// New packages include a standalone installer; older packages remain valid.
+	allowed["install.sh"] = true
 	allowed["bin/geoip_IR.dat"] = true
 	allowed["bin/geosite_IR.dat"] = true
 	manifest := filepath.Join(dir, "MANIFEST.sha256")
