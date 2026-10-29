@@ -2,6 +2,22 @@
 
 ## 安装教程
 
+### 从 GitHub 一键安装
+
+目标服务器需运行 Linux 和 systemd，并安装 GitHub CLI（`gh`）、`tar`、`sha256sum` 和 `sudo`。本仓库目前是私有的，请先用有仓库访问权限的账号执行 `gh auth login`。安装脚本使用当前用户的 GitHub 凭据下载最新发行版，自动检查架构和安装包校验值，然后通过 `sudo` 安装；服务器不需要 Go。
+
+```bash
+( set -o pipefail; gh api -H 'Accept: application/vnd.github.raw+json' 'repos/xiaoxya/x-ui/contents/deployment/install-online.sh?ref=main' | bash )
+```
+
+默认端口为 `2053`。要指定端口，例如 `8080`：
+
+```bash
+( set -o pipefail; gh api -H 'Accept: application/vnd.github.raw+json' 'repos/xiaoxya/x-ui/contents/deployment/install-online.sh?ref=main' | bash -s -- --port 8080 )
+```
+
+安装包保存在当前用户的 `~/xui-installers/`，请保留该目录以便安装中断时恢复。可传入 `--download-only` 仅下载和校验，或使用 `--version v0.1.1` 指定发行版。下载后运行脚本会安装软件，请确认来源可信。
+
 ### 下载 GitHub 构建包
 
 在仓库的 **Releases** 页面下载与服务器架构匹配的安装包及 `.sha256` 校验文件。推送版本标签（例如 `v1.0.0`）后，工作流会自动构建、验证并发布 AMD64 和 ARM64 安装包。私有仓库需要有访问权限的账号登录下载。
