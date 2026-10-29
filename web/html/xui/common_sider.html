@@ -1,0 +1,78 @@
+{{define "menuItems"}}
+<a-row style="padding: .5rem;">
+    <a-col span="12" style="font-size: 18px; font-weight: bold;">{{ i18n "pages.index.panelTitle" }}</a-col>
+    <a-col span="12" style="text-align: right; padding-top: .2rem;">
+        <theme-switch />
+    </a-col>
+</a-row>
+<a-divider style="margin: 0"></a-divider>
+<a-menu :theme="themeSwitcher.currentTheme" mode="inline" :selected-keys="['{{ .request_uri }}']"
+@click="({key}) => key.startsWith('http') ? window.open(key) : location.href = key">
+    <a-menu-item key="{{ .base_path }}xui/">
+        <a-icon type="dashboard"></a-icon>
+        <span><strong>{{ i18n "menu.dashboard"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/inbounds">
+        <a-icon type="cloud-download"></a-icon>
+        <span><strong>{{ i18n "menu.inbounds"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/outbounds">
+        <a-icon type="cloud-upload"></a-icon>
+        <span><strong>{{ i18n "menu.outbounds"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/routing">
+        <a-icon type="branches"></a-icon>
+        <span><strong>{{ i18n "menu.routing"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/xray">
+        <a-icon type="tool"></a-icon>
+        <span><strong>{{ i18n "menu.xray"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/api">
+        <a-icon type="api"></a-icon>
+        <span><strong>{{ i18n "menu.apiDocs"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}xui/settings">
+        <a-icon type="setting"></a-icon>
+        <span><strong>{{ i18n "menu.settings"}}</strong></span>
+    </a-menu-item>
+    <a-menu-item key="{{ .base_path }}logout">
+        <a-icon type="logout"></a-icon>
+        <span><strong>{{ i18n "menu.logout"}}</strong></span>
+    </a-menu-item>
+</a-menu>
+{{end}}
+
+
+{{define "commonSider"}}
+<a-layout-sider :theme="themeSwitcher.currentTheme" id="sider" collapsible breakpoint="md" collapsed-width="0">
+    {{template "menuItems" .}}
+</a-layout-sider>
+<a-drawer id="sider-drawer" placement="left" :closable="false" :class="themeSwitcher.currentTheme"
+          @close="siderDrawer.close()"
+          :visible="siderDrawer.visible"
+          :wrap-style="{ padding: 0 }">
+    <div class="drawer-handle" @click="siderDrawer.change()" slot="handle"
+         role="button" tabindex="0" :aria-expanded="siderDrawer.visible ? 'true' : 'false'"
+         :aria-label="siderDrawer.visible ? '{{ i18n "a11y.closeMenu" }}' : '{{ i18n "a11y.openMenu" }}'"
+         @keydown.enter.space.prevent="siderDrawer.change()">
+        <a-icon :type="siderDrawer.visible ? 'close' : 'menu-fold'"></a-icon>
+    </div>
+    {{template "menuItems" .}}
+</a-drawer>
+<script>
+    const siderDrawer = {
+        visible: false,
+        show() {
+            this.visible = true;
+        },
+        close() {
+            this.visible = false;
+        },
+        change() {
+            this.visible = !this.visible;
+        }
+    };
+
+</script>
+{{end}}

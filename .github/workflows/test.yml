@@ -1,0 +1,96 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+    # A version bump or a docs change does not need the suite, and running it
+    # would only cancel the run of the merge it follows.
+    paths-ignore:
+      - 'config/version'
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Go
+        id: go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # setup-go's cache key would be the one the amd64 release build uses,
+          # so whichever ran first would leave the other without its build cache.
+          cache: false
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-test-${{ steps.go.outputs.go-version }}-
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            echo
+            echo "Run: gofmt -w ."
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      # The panel is long-lived and shares state between goroutines, so a data
+      # race is a real class of bug here rather than a theoretical one.
+      - name: Test with the race detector
+        run: go test -race ./... -count=1
+
+      # Only main saves; pull requests restore its entry, and an entry a pull
+      # request saved would be visible to that pull request alone.
+      - name: Save Go cache
+        if: github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      # go.mod and go.sum must already be in the state `go mod tidy` produces,
+      # or a dependency change silently drifts from what is committed.
+      - name: Check go.mod is tidy
+        run: |
+          cp go.mod go.mod.bak
+          cp go.sum go.sum.bak
+          go mod tidy
+          if ! diff -q go.mod go.mod.bak > /dev/null || ! diff -q go.sum go.sum.bak > /dev/null; then
+            echo "go.mod or go.sum is not tidy; run: go mod tidy"
+            diff go.mod.bak go.mod || true
+            diff go.sum.bak go.sum || true
+            rm -f go.mod.bak go.sum.bak
+            exit 1
+          fi
+          rm -f go.mod.bak go.sum.bak

@@ -1,0 +1,441 @@
+package sub
+
+import (
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/alireza0/x-ui/database/model"
+	"github.com/alireza0/x-ui/logger"
+	"github.com/alireza0/x-ui/util/json_util"
+	"github.com/alireza0/x-ui/util/random"
+	"github.com/alireza0/x-ui/web/service"
+	"github.com/alireza0/x-ui/xray"
+)
+
+//go:embed default.json
+var defaultJson string
+
+var errXrayInsecureTLS = errors.New("allowInsecure is unsupported; configure pinnedPeerCertSha256")
+
+type SubJsonService struct {
+	configJson       map[string]interface{}
+	defaultOutbounds []json_util.RawMessage
+	mux              string
+
+	inboundService service.InboundService
+	SubService     *SubService
+}
+
+func NewSubJsonService(mux string, rules string, subService *SubService) *SubJsonService {
+	var configJson map[string]interface{}
+	var defaultOutbounds []json_util.RawMessage
+	json.Unmarshal([]byte(defaultJson), &configJson)
+	if outboundSlices, ok := configJson["outbounds"].([]interface{}); ok {
+		for _, defaultOutbound := range outboundSlices {
+			jsonBytes, _ := json.Marshal(defaultOutbound)
+			defaultOutbounds = append(defaultOutbounds, jsonBytes)
+		}
+	}
+
+	if rules != "" {
+		var newRules []interface{}
+		routing, _ := configJson["routing"].(map[string]interface{})
+		defaultRules, _ := routing["rules"].([]interface{})
+		json.Unmarshal([]byte(rules), &newRules)
+		defaultRules = append(newRules, defaultRules...)
+		routing["rules"] = defaultRules
+		configJson["routing"] = routing
+	}
+
+	return &SubJsonService{
+		configJson:       configJson,
+		defaultOutbounds: defaultOutbounds,
+		mux:              mux,
+		SubService:       subService,
+	}
+}
+
+func (s *SubJsonService) GetJson(subId string, host string) (string, string, error) {
+	inbounds, err := s.SubService.getInboundsBySubId(subId)
+	if err != nil || len(inbounds) == 0 {
+		return "", "", err
+	}
+
+	var header string
+	var traffic xray.ClientTraffic
+	var clientTraffics []xray.ClientTraffic
+	var configArray []json_util.RawMessage
+	tunnelStatuses := service.TunnelStatuses()
+
+	// Prepare Inbounds
+	for _, inbound := range inbounds {
+		clients, err := s.inboundService.GetClients(inbound)
+		if err != nil {
+			logger.Error("SubJsonService - GetClients: Unable to get clients from inbound")
+		}
+		if clients == nil {
+			continue
+		}
+		if len(inbound.Listen) > 0 && inbound.Listen[0] == '@' {
+			listen, port, streamSettings, err := s.SubService.getFallbackMaster(inbound.Listen, inbound.StreamSettings)
+			if err == nil {
+				inbound.Listen = listen
+				inbound.Port = port
+				inbound.StreamSettings = streamSettings
+			}
+		}
+
+		for _, client := range clients {
+			if client.Enable && client.SubID == subId {
+				clientTraffics = append(clientTraffics, s.SubService.getClientTraffics(inbound.ClientStats, client.Email))
+				newConfigs := s.getConfig(inbound, client, host)
+				configArray = append(configArray, newConfigs...)
+				if tunnelInbound := quickTunnelInbound(inbound, tunnelStatuses); tunnelInbound != nil {
+					configArray = append(configArray, s.getConfig(tunnelInbound, client, host)...)
+				}
+			}
+		}
+	}
+
+	if len(configArray) == 0 {
+		return "", "", nil
+	}
+	for i, config := range configArray {
+		normalized, err := normalizeXrayTLS(config)
+		if err != nil {
+			return "", "", fmt.Errorf("Xray JSON node %d: %w", i+1, err)
+		}
+		configArray[i] = normalized
+	}
+
+	// Prepare statistics
+	for index, clientTraffic := range clientTraffics {
+		if index == 0 {
+			traffic.Up = clientTraffic.Up
+			traffic.Down = clientTraffic.Down
+			traffic.Total = clientTraffic.Total
+			if clientTraffic.ExpiryTime > 0 {
+				traffic.ExpiryTime = clientTraffic.ExpiryTime
+			}
+		} else {
+			traffic.Up += clientTraffic.Up
+			traffic.Down += clientTraffic.Down
+			if traffic.Total == 0 || clientTraffic.Total == 0 {
+				traffic.Total = 0
+			} else {
+				traffic.Total += clientTraffic.Total
+			}
+			if clientTraffic.ExpiryTime != traffic.ExpiryTime {
+				traffic.ExpiryTime = 0
+			}
+		}
+	}
+
+	// Combile outbounds
+	var finalJson []byte
+	if len(configArray) == 1 {
+		finalJson, _ = json.MarshalIndent(configArray[0], "", "  ")
+	} else {
+		finalJson, _ = json.MarshalIndent(configArray, "", "  ")
+	}
+
+	header = fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", traffic.Up, traffic.Down, traffic.Total, traffic.ExpiryTime/1000)
+	return string(finalJson), header, nil
+}
+
+// Xray no longer accepts allowInsecure=true. A pin retains an explicit trust
+// decision; without one, returning an error avoids silently changing security
+// or handing clients a configuration that the current core cannot start.
+func normalizeXrayTLS(config json_util.RawMessage) (json_util.RawMessage, error) {
+	var data map[string]any
+	if err := json.Unmarshal(config, &data); err != nil {
+		return nil, err
+	}
+	outbounds, _ := data["outbounds"].([]any)
+	for _, item := range outbounds {
+		outbound, _ := item.(map[string]any)
+		stream, _ := outbound["streamSettings"].(map[string]any)
+		tls, _ := stream["tlsSettings"].(map[string]any)
+		if tls == nil {
+			continue
+		}
+		if insecure, _ := tls["allowInsecure"].(bool); insecure {
+			pin, _ := tls["pinnedPeerCertSha256"].(string)
+			if strings.TrimSpace(pin) == "" {
+				return nil, errXrayInsecureTLS
+			}
+		}
+		delete(tls, "allowInsecure")
+	}
+	return json.Marshal(data)
+}
+
+func (s *SubJsonService) getConfig(inbound *model.Inbound, client model.Client, host string) []json_util.RawMessage {
+	var newJsonArray []json_util.RawMessage
+	stream := s.streamData(inbound.StreamSettings)
+
+	externalProxies, ok := stream["externalProxy"].([]interface{})
+	if !ok || len(externalProxies) == 0 {
+		externalProxies = []interface{}{
+			map[string]interface{}{
+				"forceTls": "same",
+				"dest":     host,
+				"port":     float64(inbound.Port),
+				"remark":   "",
+			},
+		}
+	}
+
+	for _, ep := range externalProxies {
+		extPrxy := asMap(ep)
+		proxyInbound := *inbound
+		proxyInbound.Listen = stringAt(extPrxy, "dest")
+		proxyInbound.Port = int(floatAt(extPrxy, "port"))
+		// Each proxy may override nested TLS and transport settings. Rebuild
+		// the stream so those overrides never leak to another proxy or client.
+		newStream := s.streamData(inbound.StreamSettings)
+		delete(newStream, "externalProxy")
+		var newOutbounds []json_util.RawMessage
+		switch stringAt(extPrxy, "forceTls") {
+		case "tls":
+			if newStream["security"] != "tls" {
+				newStream["security"] = "tls"
+				newStream["tlsSettings"] = map[string]interface{}{}
+			}
+		case "none":
+			if newStream["security"] != "none" {
+				newStream["security"] = "none"
+				delete(newStream, "tlsSettings")
+			}
+		}
+		if newStream["security"] != "none" {
+			newTlsSettings := mapAt(newStream, "tlsSettings")
+			if utlsValue, ok := extPrxy["utls"].(string); ok && len(utlsValue) > 0 {
+				newTlsSettings["fingerprint"] = utlsValue
+			}
+			if sniValue, ok := extPrxy["sni"].(string); ok && len(sniValue) > 0 {
+				newTlsSettings["serverName"] = sniValue
+			}
+			if alpnValue, ok := extPrxy["alpn"].([]interface{}); ok && len(alpnValue) > 0 {
+				newTlsSettings["alpn"] = alpnValue
+			}
+			if allowInsecureValue, ok := extPrxy["allowInsecure"].(bool); ok && allowInsecureValue {
+				newTlsSettings["allowInsecure"] = true
+			}
+			newStream["tlsSettings"] = newTlsSettings
+		}
+
+		if fragmentValue, ok := extPrxy["fragment"].(map[string]any); ok {
+			newStream["finalmask"] = map[string]any{
+				"tcp": []map[string]any{
+					{
+						"settings": map[string]any{
+							"delay":   fragmentValue["delay"],
+							"length":  fragmentValue["length"],
+							"packets": fragmentValue["packets"],
+						},
+						"type": "fragment",
+					},
+				},
+			}
+		}
+
+		newOutbounds = append(newOutbounds, s.genOutbound(&proxyInbound, newStream, client))
+
+		newOutbounds = append(newOutbounds, s.defaultOutbounds...)
+		newConfigJson := make(map[string]interface{})
+		for key, value := range s.configJson {
+			newConfigJson[key] = value
+		}
+		newConfigJson["outbounds"] = newOutbounds
+		newConfigJson["remarks"] = s.SubService.genRemark(&proxyInbound, client.Email, stringAt(extPrxy, "remark"))
+
+		newConfig, _ := json.MarshalIndent(newConfigJson, "", "  ")
+		newJsonArray = append(newJsonArray, newConfig)
+	}
+
+	return newJsonArray
+}
+
+func (s *SubJsonService) streamData(stream string) map[string]any {
+	var streamSettings map[string]any
+	json.Unmarshal([]byte(stream), &streamSettings)
+	security, _ := streamSettings["security"].(string)
+	switch security {
+	case "tls":
+		streamSettings["tlsSettings"] = s.tlsData(mapAt(streamSettings, "tlsSettings"))
+	case "reality":
+		streamSettings["realitySettings"] = s.realityData(mapAt(streamSettings, "realitySettings"))
+	}
+	delete(streamSettings, "sockopt")
+	xray.MoveUDPHopToMask(streamSettings)
+	xray.DropFilterMasks(streamSettings)
+
+	// remove proxy protocol
+	network, _ := streamSettings["network"].(string)
+	switch network {
+	case "tcp":
+		streamSettings["tcpSettings"] = s.removeAcceptProxy(streamSettings["tcpSettings"])
+	case "ws":
+		streamSettings["wsSettings"] = s.removeAcceptProxy(streamSettings["wsSettings"])
+	case "httpupgrade":
+		streamSettings["httpupgradeSettings"] = s.removeAcceptProxy(streamSettings["httpupgradeSettings"])
+	}
+	return streamSettings
+}
+
+func (s *SubJsonService) removeAcceptProxy(setting interface{}) map[string]interface{} {
+	netSettings, ok := setting.(map[string]interface{})
+	if ok {
+		delete(netSettings, "acceptProxyProtocol")
+	}
+	return netSettings
+}
+
+func (s *SubJsonService) tlsData(tData map[string]interface{}) map[string]interface{} {
+	tlsData := make(map[string]interface{}, 1)
+	tlsClientSettings, _ := tData["settings"].(map[string]interface{})
+
+	tlsData["serverName"] = tData["serverName"]
+	tlsData["alpn"] = tData["alpn"]
+	if allowInsecure, ok := tlsClientSettings["allowInsecure"].(bool); ok {
+		tlsData["allowInsecure"] = allowInsecure
+	}
+	if fingerprint, ok := tlsClientSettings["fingerprint"].(string); ok {
+		tlsData["fingerprint"] = fingerprint
+	}
+	if pcs := pinnedPeerCertSha256ToString(tlsClientSettings); pcs != "" {
+		tlsData["pinnedPeerCertSha256"] = pcs
+	}
+	if vcn, ok := tlsClientSettings["verifyPeerCertByName"].(string); ok && vcn != "" {
+		tlsData["verifyPeerCertByName"] = vcn
+	}
+	return tlsData
+}
+
+func (s *SubJsonService) realityData(rData map[string]interface{}) map[string]interface{} {
+	rltyData := make(map[string]interface{}, 1)
+	rltyClientSettings, _ := rData["settings"].(map[string]interface{})
+
+	rltyData["show"] = false
+	rltyData["publicKey"] = rltyClientSettings["publicKey"]
+	rltyData["fingerprint"] = rltyClientSettings["fingerprint"]
+	rltyData["mldsa65Verify"] = rltyClientSettings["mldsa65Verify"]
+
+	// Set random data
+	rltyData["spiderX"] = "/" + random.Seq(15)
+	shortIds, ok := rData["shortIds"].([]interface{})
+	if ok && len(shortIds) > 0 {
+		rltyData["shortId"] = randomString(shortIds)
+	} else {
+		rltyData["shortId"] = ""
+	}
+	serverNames, ok := rData["serverNames"].([]interface{})
+	if ok && len(serverNames) > 0 {
+		rltyData["serverName"] = randomString(serverNames)
+	} else {
+		rltyData["serverName"] = ""
+	}
+
+	return rltyData
+}
+
+func (s *SubJsonService) genOutbound(inbound *model.Inbound, streamSettings map[string]any, client model.Client) json_util.RawMessage {
+	outbound := Outbound{}
+
+	outbound.Protocol = string(inbound.Protocol)
+	outbound.Tag = "proxy"
+
+	// The core rejects mux on a MASQUE outbound.
+	if s.mux != "" && inbound.Protocol != model.Masque {
+		outbound.Mux = json_util.RawMessage(s.mux)
+	}
+	// XDRIVE clients need mux for every connection; the configured one is kept
+	// when the core takes it.
+	if network, _ := streamSettings["network"].(string); network == "xdrive" && !xray.XDriveMuxValid(s.mux) {
+		outbound.Mux = json_util.RawMessage(`{"enabled":true}`)
+	}
+
+	var inboundSettings map[string]interface{}
+	json.Unmarshal([]byte(inbound.Settings), &inboundSettings)
+
+	settings := map[string]any{
+		"address": inbound.Listen,
+		"port":    inbound.Port,
+		"level":   8,
+	}
+
+	switch inbound.Protocol {
+	case model.VLESS:
+		settings["id"] = client.ID
+		settings["flow"] = client.Flow
+		settings["encryption"] = inboundSettings["encryption"]
+	case model.VMess:
+		settings["id"] = client.ID
+		settings["alterId"] = 0
+		settings["security"] = "auto"
+	case model.Trojan:
+		settings["password"] = client.Password
+	case model.Shadowsocks:
+		settings["password"] = client.Password
+		method, _ := inboundSettings["method"].(string)
+		settings["method"] = method
+		if strings.HasPrefix(method, "2022") {
+			if serverPassword, ok := inboundSettings["password"].(string); ok {
+				settings["password"] = fmt.Sprintf("%s:%s", serverPassword, client.Password)
+			}
+		}
+	case model.Hysteria:
+		settings["version"] = inboundSettings["version"]
+		hyStream := mapAt(streamSettings, "hysteriaSettings")
+		outHyStream := map[string]any{
+			"version": inboundSettings["version"],
+			"auth":    client.Auth,
+		}
+		if udpIdleTimeout, ok := hyStream["udpIdleTimeout"].(float64); ok {
+			outHyStream["udpIdleTimeout"] = int(udpIdleTimeout)
+		}
+		streamSettings["hysteriaSettings"] = outHyStream
+
+		streamSettings["network"] = "hysteria"
+		streamSettings["security"] = "tls"
+	case model.Masque:
+		delete(settings, "level")
+		masqueStream := map[string]any{
+			"user": client.Email,
+			"pass": client.Pass,
+		}
+		if path, _ := mapAt(streamSettings, "masqueSettings")["path"].(string); path != "" {
+			masqueStream["path"] = path
+		}
+		streamSettings["masqueSettings"] = masqueStream
+		streamSettings["network"] = "masque"
+		streamSettings["security"] = "tls"
+	}
+
+	outbound.StreamSettings = streamSettings
+	outbound.Settings = settings
+
+	result, _ := json.MarshalIndent(outbound, "", "  ")
+	return result
+}
+
+type Outbound struct {
+	Protocol       string               `json:"protocol"`
+	Tag            string               `json:"tag"`
+	StreamSettings map[string]any       `json:"streamSettings"`
+	Mux            json_util.RawMessage `json:"mux,omitempty"`
+	Settings       map[string]any       `json:"settings,omitempty"`
+}
+
+type ServerSetting struct {
+	Password string `json:"password"`
+	Level    int    `json:"level"`
+	Address  string `json:"address"`
+	Port     int    `json:"port"`
+	Flow     string `json:"flow,omitempty"`
+	Method   string `json:"method,omitempty"`
+}

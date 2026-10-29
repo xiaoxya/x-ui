@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="{{ .lang }}">
+{{template "head" .}}
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/codemirror.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/fold/foldgutter.css">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/xq.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/lint/lint.css">
+<script src="{{ .base_path }}assets/base64/base64.min.js"></script>
+<script src="{{ .base_path }}assets/codemirror/codemirror.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jshint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jsonlint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/javascript-lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/hint/javascript-hint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldcode.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldgutter.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/brace-fold.js"></script>
+<style>
+    @media (min-width: 769px) {
+        .ant-layout-content {
+            margin: 24px 16px;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .ant-card-body {
+            padding: .5rem;
+        }
+    }
+
+    .ant-col-sm-24 {
+        margin: 0.5rem -2rem 0.5rem 2rem;
+    }
+    .online-animation .ant-badge-status-dot {
+        animation: 1.2s ease infinite normal none running onlineAnimation;
+    }
+    @keyframes onlineAnimation {
+        0%, 50%, 100%   { transform: scale(1);  opacity:  1; }
+        10%             { transform: scale(1.5); opacity: .2; }
+    }
+    .info-large-tag {
+        max-width: 200px;
+        overflow: hidden;
+    }
+</style>
+<body>
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme">
+    {{ template "commonSider" . }}
+    <a-layout id="content-layout">
+        <a-layout-content>
+            <a-spin :spinning="spinning" :delay="500" tip='{{ i18n "loading"}}'>
+                <transition name="list" appear>
+                    <a-alert type="error" v-if="showAlert" style="margin-bottom: 10px"
+                        message='{{ i18n "secAlertTitle" }}'
+                        description='{{ i18n "secAlertSsl" }}'
+                        show-icon closable>
+                    </a-alert>
+                </transition>
+                <transition name="list" appear>
+                    <a-card hoverable>
+                        <a-row>
+                            <a-col :xs="24" :sm="24" :lg="12">
+                                <strong>{{ i18n "pages.outbounds.totalUsage" }}:</strong>
+                                <a-tag color="blue">[[ sizeFormat(total.up + total.down) ]] (↑[[ sizeFormat(total.up) ]] ↓[[ sizeFormat(total.down) ]])</a-tag>
+                            </a-col>
+                            <a-col :xs="24" :sm="24" :lg="12">
+                                <strong>{{ i18n "pages.outbounds.outboundCount" }}:</strong>
+                                <a-tag color="blue" style="margin-right: 0;">[[ dbOutbounds.length ]]</a-tag>
+                                <a-popover title='{{ i18n "online" }}' :overlay-class-name="themeSwitcher.currentTheme">
+                                    <template slot="content">
+                                        <p v-for="tag in onlineOutbounds" style="margin: 0;">[[ tag ]]</p>
+                                    </template>
+                                    <a-tag color="green" v-if="onlineOutbounds.length">[[ onlineOutbounds.length ]]</a-tag>
+                                </a-popover>
+                            </a-col>
+                        </a-row>
+                    </a-card>
+                </transition>
+                <transition name="list" appear>
+                    <a-card hoverable>
+                        <div slot="title">
+                            <a-row>
+                                <a-col :xs="12" :sm="12" :lg="12">
+                                    <a-button type="primary" icon="plus" @click="addOutbound()">
+                                        <template v-if="!isMobile">{{ i18n "pages.xray.outbound.addOutbound" }}</template>
+                                    </a-button>
+                                    <a-dropdown :trigger="['click']">
+                                        <a-button type="primary" icon="menu">
+                                            <template v-if="!isMobile">{{ i18n "pages.inbounds.generalActions" }}</template>
+                                        </a-button>
+                                        <a-menu slot="overlay" @click="a => generalActions(a)" :theme="themeSwitcher.currentTheme">
+                                            <a-menu-item key="testAll">
+                                                <a-icon type="thunderbolt"></a-icon>
+                                                {{ i18n "pages.outbounds.testAll" }}
+                                            </a-menu-item>
+                                            <a-menu-item key="resetTraffics">
+                                                <a-icon type="reload"></a-icon>
+                                                {{ i18n "pages.outbounds.resetAllTraffic" }}
+                                            </a-menu-item>
+                                            <a-menu-item key="warp">
+                                                <a-icon type="cloud"></a-icon>
+                                                WARP
+                                            </a-menu-item>
+                                            <a-menu-divider></a-menu-divider>
+                                            <a-menu-item key="import">
+                                                <a-icon type="import"></a-icon>
+                                                {{ i18n "import" }}
+                                            </a-menu-item>
+                                            <a-menu-item key="export">
+                                                <a-icon type="export"></a-icon>
+                                                {{ i18n "export" }}
+                                            </a-menu-item>
+                                        </a-menu>
+                                    </a-dropdown>
+                                </a-col>
+                                <a-col :xs="12" :sm="12" :lg="12" style="text-align: right;">
+                                    <a-select v-model="refreshInterval"
+                                              v-if="isRefreshEnabled"
+                                              aria-label='{{ i18n "a11y.refreshInterval" }}'
+                                              style="width: 70px;"
+                                              @change="changeRefreshInterval" :dropdown-class-name="themeSwitcher.currentTheme">
+                                        <a-select-option v-for="key in [5,10,30,60]" :value="key*1000">[[ key ]]s</a-select-option>
+                                    </a-select>
+                                    <a-icon type="sync" :spin="refreshing" @click="manualRefresh" style="margin: 0 5px;"
+                                            aria-label='{{ i18n "a11y.refresh" }}'></a-icon>
+                                    <a-switch v-model="isRefreshEnabled" @change="toggleRefresh"
+                                              aria-label='{{ i18n "a11y.autoRefresh" }}'></a-switch>
+                                </a-col>
+                            </a-row>
+                        </div>
+                        <div :style="isMobile ? '' : 'display: flex; align-items: center; justify-content: flex-start;'">
+                            <a-tooltip :title='`{{ i18n "filter" }}`'>
+                                <a-switch v-model="enableFilter"
+                                    :style="isMobile ? 'margin-bottom: .5rem; display: flex;' : 'margin-right: .5rem;'"
+                                    @change="toggleFilter">
+                                    <a-icon slot="checkedChildren" type="search"></a-icon>
+                                    <a-icon slot="unCheckedChildren" type="filter"></a-icon>
+                                </a-switch>
+                            </a-tooltip>
+                            <a-input v-if="!enableFilter" v-model.lazy="searchKey" placeholder='{{ i18n "search" }}' aria-label='{{ i18n "search" }}' autofocus style="max-width: 300px" :size="isMobile ? 'small' : ''"></a-input>
+                            <a-radio-group v-if="enableFilter" v-model="filterBy" @change="filterOutbounds" button-style="solid" :size="isMobile ? 'small' : ''">
+                                <a-radio-button value="">{{ i18n "none" }}</a-radio-button>
+                                <a-radio-button value="online">{{ i18n "online" }}</a-radio-button>
+                            </a-radio-group>
+                        </div>
+                        <a-back-top></a-back-top>
+                        <a-table :columns="isMobile ? mobileColumns : columns" :row-key="r => r.id"
+                                 :data-source="searchedOutbounds"
+                                 :scroll="isMobile ? {} : { x: 800 }"
+                                 :pagination="pagination(searchedOutbounds)"
+                                 style="margin-top: 10px;">
+                            <template slot="actions" slot-scope="text, row, index">
+                                <a-tooltip v-if="index > 0">
+                                    <template slot="title">{{ i18n "pages.xray.rules.first" }}</template>
+                                    <a-icon style="font-size: 24px; cursor: pointer;" class="normal-icon" type="vertical-align-top" @click="setFirstOutbound(row.id)"></a-icon>
+                                </a-tooltip>
+                                <a-tooltip>
+                                    <template slot="title">{{ i18n "pages.outbounds.edit" }}</template>
+                                    <a-icon style="font-size: 24px; cursor: pointer;" class="normal-icon" type="edit" @click="editOutbound(row)"></a-icon>
+                                </a-tooltip>
+                                <a-tooltip>
+                                    <template slot="title">{{ i18n "pages.outbounds.resetTraffic" }}</template>
+                                    <a-popconfirm @confirm="resetTraffic(row.id, false)"
+                                        title='{{ i18n "pages.inbounds.resetTrafficContent"}}'
+                                        :overlay-class-name="themeSwitcher.currentTheme"
+                                        ok-text='{{ i18n "reset"}}'
+                                        cancel-text='{{ i18n "cancel"}}'>
+                                        <a-icon slot="icon" type="question-circle-o" :style="themeSwitcher.isDarkTheme ? 'color: #3c89e8' : 'color: blue'"></a-icon>
+                                        <a-icon style="font-size: 24px; cursor: pointer;" class="normal-icon" type="retweet"></a-icon>
+                                    </a-popconfirm>
+                                </a-tooltip>
+                                <a-tooltip>
+                                    <template slot="title"><span style="color: #FF4D4F">{{ i18n "delete" }}</span></template>
+                                    <a-popconfirm @confirm="deleteOutbound(row.id, false)"
+                                        title='{{ i18n "pages.outbounds.deleteConfirm" }}'
+                                        :overlay-class-name="themeSwitcher.currentTheme"
+                                        ok-text='{{ i18n "delete"}}'
+                                        ok-type="danger"
+                                        cancel-text='{{ i18n "cancel"}}'>
+                                        <a-icon slot="icon" type="question-circle-o" style="color: #e04141"></a-icon>
+                                        <a-icon style="font-size: 24px; cursor: pointer;" class="delete-icon" type="delete"></a-icon>
+                                    </a-popconfirm>
+                                </a-tooltip>
+                            </template>
+                            <template slot="actionMenu" slot-scope="text, row, index">
+                                <a-dropdown :trigger="['click']">
+                                    <a-icon @click="e => e.preventDefault()" type="ellipsis" style="font-size: 20px;"></a-icon>
+                                    <a-menu slot="overlay" :theme="themeSwitcher.currentTheme">
+                                        <a-menu-item v-if="index > 0" @click="setFirstOutbound(row.id)">
+                                            <a-icon style="font-size: 14px;" type="vertical-align-top"></a-icon>
+                                            {{ i18n "pages.xray.rules.first" }}
+                                        </a-menu-item>
+                                        <a-menu-item @click="editOutbound(row)">
+                                            <a-icon style="font-size: 14px;" type="edit"></a-icon>
+                                            {{ i18n "pages.outbounds.edit" }}
+                                        </a-menu-item>
+                                        <a-menu-item @click="resetTraffic(row.id)">
+                                            <a-icon style="font-size: 14px;" type="retweet"></a-icon>
+                                            {{ i18n "pages.outbounds.resetTraffic" }}
+                                        </a-menu-item>
+                                        <a-menu-item @click="deleteOutbound(row.id)">
+                                            <a-icon style="font-size: 14px;" type="delete"></a-icon>
+                                            <span style="color: #FF4D4F"> {{ i18n "delete" }}</span>
+                                        </a-menu-item>
+                                    </a-menu>
+                                </a-dropdown>
+                            </template>
+                            <template slot="online" slot-scope="text, row">
+                                <a-tag v-if="isOutboundOnline(row.tag)" color="green">{{ i18n "online" }}</a-tag>
+                                <a-tag v-else>{{ i18n "offline" }}</a-tag>
+                            </template>
+                            <template slot="tag" slot-scope="text, row">
+                                <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                                    <template slot="title">
+                                        <template v-if="isOutboundOnline(row.tag)">{{ i18n "online" }}</template>
+                                        <template v-else>{{ i18n "offline" }}</template>
+                                    </template>
+                                    <a-badge
+                                        :class="isOutboundOnline(row.tag) ? 'online-animation' : ''"
+                                        :color="isOutboundOnline(row.tag) ? 'green' : (themeSwitcher.isDarkTheme ? '#2c3950' : '#bcbcbc')">
+                                    </a-badge>
+                                </a-tooltip>
+                                [[ row.tag ]]
+                            </template>
+                            <template slot="protocol" slot-scope="text, row">
+                                <a-tag color="purple">[[ row.protocol ]]</a-tag>
+                                <template v-if="[Protocols.VMess, Protocols.VLESS, Protocols.Trojan, Protocols.Shadowsocks].includes(row.protocol)">
+                                    <a-tag color="blue">[[ row.toOutbound().stream.network ]]</a-tag>
+                                    <a-tag v-if="row.toOutbound().stream.isTls" color="green">tls</a-tag>
+                                    <a-tag v-if="row.toOutbound().stream.isReality" color="green">reality</a-tag>
+                                </template>
+                            </template>
+                            <template slot="address" slot-scope="text, row">
+                                <p style="margin: 0 5px;" v-for="addr in findOutboundAddress(row.toOutbound().toJson())">[[ addr ]]</p>
+                            </template>
+                            <template slot="traffic" slot-scope="text, row">
+                                <a-tag color="blue">↑[[ sizeFormat(row.up) ]] / ↓[[ sizeFormat(row.down) ]]</a-tag>
+                            </template>
+                            <template slot="test" slot-scope="text, row">
+                                <span style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                                    <a-tooltip>
+                                        <template slot="title">{{ i18n "pages.outbounds.testTooltip" }}</template>
+                                        <a-icon style="font-size: 22px; cursor: pointer;" class="normal-icon"
+                                            :type="(testResults[row.id] && testResults[row.id].testing) ? 'loading' : 'thunderbolt'"
+                                            @click="testOutbound(row.id)"></a-icon>
+                                    </a-tooltip>
+                                    <template v-if="testResults[row.id] && !testResults[row.id].testing">
+                                        <a-tooltip v-if="testResults[row.id].success">
+                                            <template slot="title">{{ i18n "pages.outbounds.testSuccess" }}</template>
+                                            <a-tag color="green" style="margin: 0;">[[ testResults[row.id].delay ]] ms</a-tag>
+                                        </a-tooltip>
+                                        <a-tooltip v-else>
+                                            <template slot="title">[[ testResults[row.id].message || '{{ i18n "pages.outbounds.testFailed" }}' ]]</template>
+                                            <a-tag color="red" style="margin: 0;">{{ i18n "pages.outbounds.testFailed" }}</a-tag>
+                                        </a-tooltip>
+                                    </template>
+                                </span>
+                            </template>
+                            <template slot="info" slot-scope="text, row">
+                                <a-popover placement="bottomRight" :overlay-class-name="themeSwitcher.currentTheme" trigger="click">
+                                    <template slot="content">
+                                        <table cellpadding="2">
+                                            <tr>
+                                                <td>{{ i18n "online" }}</td>
+                                                <td>
+                                                    <a-tag style="margin:0;" v-if="isOutboundOnline(row.tag)" color="green">{{ i18n "online" }}</a-tag>
+                                                    <a-tag style="margin:0;" v-else>{{ i18n "offline" }}</a-tag>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>{{ i18n "protocol" }}</td>
+                                                <td>
+                                                    <a-tag style="margin:0;" color="purple">[[ row.protocol ]]</a-tag>
+                                                    <template v-if="[Protocols.VMess, Protocols.VLESS, Protocols.Trojan, Protocols.Shadowsocks].includes(row.protocol)">
+                                                        <a-tag style="margin:0;" color="blue">[[ row.toOutbound().stream.network ]]</a-tag>
+                                                        <a-tag style="margin:0;" v-if="row.toOutbound().stream.isTls" color="green">tls</a-tag>
+                                                        <a-tag style="margin:0;" v-if="row.toOutbound().stream.isReality" color="green">reality</a-tag>
+                                                    </template>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>{{ i18n "address" }}</td>
+                                                <td>
+                                                    <p style="margin: 0;" v-for="addr in findOutboundAddress(row.toOutbound().toJson())">[[ addr ]]</p>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>{{ i18n "pages.inbounds.traffic" }}</td>
+                                                <td><a-tag style="margin:0;" color="blue">↑[[ sizeFormat(row.up) ]] / ↓[[ sizeFormat(row.down) ]]</a-tag></td>
+                                            </tr>
+                                        </table>
+                                    </template>
+                                    <a-button shape="round" size="small" style="font-size: 14px; padding: 0 10px;">
+                                        <a-icon type="info"></a-icon>
+                                    </a-button>
+                                </a-popover>
+                            </template>
+                        </a-table>
+                    </a-card>
+                </transition>
+            </a-spin>
+        </a-layout-content>
+    </a-layout>
+</a-layout>
+{{template "js" .}}
+{{template "component/themeSwitcher" .}}
+<script src="{{ .base_path }}assets/js/model/outbound.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/dboutbound.js?{{ .cur_ver }}"></script>
+<script>
+    const columns = [
+        { title: "ID", align: 'center', width: 30, dataIndex: 'id' },
+        { title: '{{ i18n "pages.inbounds.operate" }}', align: 'right', width: 70, scopedSlots: { customRender: 'actions' } },
+        { title: '{{ i18n "online" }}', align: 'center', width: 60, scopedSlots: { customRender: 'online' } },
+        { title: '{{ i18n "pages.xray.outbound.tag"}}', align: 'left', width: 100, scopedSlots: { customRender: 'tag' } },
+        { title: '{{ i18n "protocol"}}', align: 'center', width: 120, scopedSlots: { customRender: 'protocol' } },
+        { title: '{{ i18n "address"}}', width: 150, align: 'center', scopedSlots: { customRender: 'address' } },
+        { title: '{{ i18n "pages.inbounds.traffic" }}', align: 'center', width: 140, scopedSlots: { customRender: 'traffic' } },
+        { title: '{{ i18n "pages.outbounds.test" }}', align: 'center', width: 120, scopedSlots: { customRender: 'test' } },
+    ];
+    const mobileColumns = [
+        { title: '', align: 'center', width: 10, scopedSlots: { customRender: 'actionMenu' } },
+        { title: '{{ i18n "pages.xray.outbound.tag"}}', align: 'center', scopedSlots: { customRender: 'tag' } },
+        { title: '{{ i18n "pages.outbounds.test" }}', align: 'center', scopedSlots: { customRender: 'test' } },
+        { title: '{{ i18n "pages.inbounds.info" }}', align: 'center', width: 10, scopedSlots: { customRender: 'info' } },
+    ];
+
+    const app = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#app',
+        data: {
+            siderDrawer,
+            themeSwitcher,
+            spinning: false,
+            isMobile: window.innerWidth <= 768,
+            dbOutbounds: [],
+            searchedOutbounds: [],
+            onlineOutbounds: [],
+            clientReverseTags: [],
+            searchKey: '',
+            enableFilter: false,
+            filterBy: '',
+            isRefreshEnabled: localStorage.getItem("isRefreshEnabled") === "true",
+            refreshing: false,
+            refreshInterval: Number(localStorage.getItem("refreshInterval")) || 5000,
+            showAlert: false,
+            pageSize: 0,
+            testResults: {},
+            testingAll: false,
+        },
+        methods: {
+            loading(spinning = true) { this.spinning = spinning; },
+            async getDBOutbounds() {
+                this.refreshing = true;
+                const msg = await HttpUtil.post('/xui/outbound/list');
+                if (!msg.success) {
+                    this.refreshing = false;
+                    return;
+                }
+                await this.getOnlineOutbounds();
+                this.setOutbounds(msg.obj);
+                setTimeout(() => { this.refreshing = false; }, 500);
+            },
+            async getOnlineOutbounds() {
+                const msg = await HttpUtil.post('/xui/outbound/onlines');
+                if (msg.success) {
+                    this.onlineOutbounds = msg.obj != null ? msg.obj : [];
+                }
+            },
+            async getClientReverseTags() {
+                const msg = await HttpUtil.post('/xui/outbound/reverseTags');
+                if (msg.success) {
+                    this.clientReverseTags = msg.obj != null ? msg.obj : [];
+                }
+            },
+            setOutbounds(list) {
+                this.dbOutbounds = [];
+                this.searchedOutbounds = [];
+                for (const item of list) {
+                    const dbOutbound = new DBOutbound(item);
+                    this.dbOutbounds.push(dbOutbound);
+                    this.searchedOutbounds.push(dbOutbound);
+                }
+                this.filterOutbounds();
+            },
+            isOutboundOnline(tag) {
+                return this.onlineOutbounds.includes(tag);
+            },
+            applyOutboundFilter() {
+                let list = this.dbOutbounds.slice();
+                if (this.enableFilter && this.filterBy === 'online') {
+                    list = list.filter(o => this.isOutboundOnline(o.tag));
+                }
+                if (this.searchKey) {
+                    const key = this.searchKey.toLowerCase();
+                    list = list.filter(o =>
+                        o.tag.toLowerCase().includes(key) ||
+                        o.protocol.toLowerCase().includes(key)
+                    );
+                }
+                this.searchedOutbounds = list;
+            },
+            filterOutbounds() {
+                this.applyOutboundFilter();
+            },
+            toggleFilter() {
+                if (!this.enableFilter) {
+                    this.filterBy = '';
+                }
+                this.filterOutbounds();
+            },
+            findOutboundAddress(o) {
+                let serverObj = null;
+                switch (o.protocol) {
+                    case Protocols.VMess:
+                    case Protocols.VLESS:
+                        if (o.settings?.address && o.settings?.port) {
+                            return [o.settings.address + ':' + o.settings.port];
+                        }
+                        break;
+                    case Protocols.HTTP:
+                    case Protocols.Socks:
+                    case Protocols.Shadowsocks:
+                    case Protocols.Trojan:
+                        serverObj = o.settings?.servers;
+                        break;
+                    case Protocols.Hysteria:
+                    case Protocols.Masque:
+                    case Protocols.DNS:
+                        return [o.settings?.address + ':' + o.settings?.port];
+                    case Protocols.Wireguard:
+                        return o.settings?.peers?.map(peer => peer.endpoint) ?? [];
+                }
+                return serverObj ? serverObj.map(obj => obj.address + ':' + obj.port) : [];
+            },
+            allTags(excludeId) {
+                const tags = this.dbOutbounds.filter(o => o.id !== excludeId).map(o => o.tag).filter(t => t);
+                // client reverse tags act as outbounds (portals); only usable while their client is online
+                const onlineReverse = this.clientReverseTags.filter(t => this.onlineOutbounds.includes(t));
+                return [...new Set([...tags, ...onlineReverse])];
+            },
+            addOutbound() {
+                outModal.show({
+                    title: '{{ i18n "pages.xray.outbound.addOutbound"}}',
+                    okText: '{{ i18n "pages.xray.outbound.addOutbound" }}',
+                    confirm: async (outbound) => {
+                        outModal.loading();
+                        const db = new DBOutbound();
+                        const data = DBOutbound.payloadFromOutbound(Outbound.fromJson(outbound), db);
+                        await this.submit('/xui/outbound/add', data, outModal);
+                    },
+                    isEdit: false,
+                    tags: this.allTags(-1),
+                });
+            },
+            editOutbound(dbOutbound) {
+                outModal.show({
+                    title: '{{ i18n "pages.xray.outbound.editOutbound"}} ' + dbOutbound.tag,
+                    outbound: dbOutbound.toOutbound().toJson(),
+                    confirm: async (outbound) => {
+                        outModal.loading();
+                        const data = DBOutbound.payloadFromOutbound(Outbound.fromJson(outbound), dbOutbound);
+                        await this.submit(`/xui/outbound/update/${dbOutbound.id}`, data, outModal);
+                    },
+                    isEdit: true,
+                    tags: this.allTags(dbOutbound.id),
+                });
+            },
+            deleteOutbound(id, confirmation = true) {
+                if (confirmation) {
+                    this.$confirm({
+                        title: '{{ i18n "pages.outbounds.delete" }}',
+                        content: '{{ i18n "pages.outbounds.deleteConfirm" }}',
+                        class: themeSwitcher.currentTheme,
+                        okText: '{{ i18n "delete"}}',
+                        cancelText: '{{ i18n "cancel"}}',
+                        onOk: () => this.submit(`/xui/outbound/del/${id}`),
+                    });
+                } else {
+                    this.submit(`/xui/outbound/del/${id}`);
+                }
+            },
+            setFirstOutbound(id) {
+                this.submit(`/xui/outbound/setFirst/${id}`);
+            },
+            resetTraffic(id, confirmation = true) {
+                if (confirmation) {
+                    this.$confirm({
+                        title: '{{ i18n "pages.outbounds.resetTraffic" }}',
+                        okText: '{{ i18n "reset"}}',
+                        cancelText: '{{ i18n "cancel"}}',
+                        class: themeSwitcher.currentTheme,
+                        onOk: () => this.submit(`/xui/outbound/${id}/resetTraffic`),
+                    });
+                } else {
+                    this.submit(`/xui/outbound/${id}/resetTraffic`);
+                }
+            },
+            resetAllTraffics() {
+                this.$confirm({
+                    title: '{{ i18n "pages.outbounds.resetAllTraffic" }}',
+                    okText: '{{ i18n "reset"}}',
+                    cancelText: '{{ i18n "cancel"}}',
+                    class: themeSwitcher.currentTheme,
+                    onOk: () => this.submit('/xui/outbound/resetAllTraffics'),
+                });
+            },
+            generalActions({ key }) {
+                switch (key) {
+                    case 'testAll':
+                        this.testAllOutbounds();
+                        break;
+                    case 'resetTraffics':
+                        this.resetAllTraffics();
+                        break;
+                    case 'warp':
+                        warpModal.show();
+                        break;
+                    case 'import':
+                        this.importOutbounds();
+                        break;
+                    case 'export':
+                        this.exportOutbounds();
+                        break;
+                }
+            },
+            exportOutbounds() {
+                const arr = this.dbOutbounds.map(o => o.toOutbound().toJson());
+                txtModal.show('{{ i18n "export" }}', JSON.stringify(arr, null, 2), 'outbounds.json');
+            },
+            importOutbounds() {
+                promptModal.open({
+                    title: '{{ i18n "import" }}',
+                    type: 'textarea',
+                    value: '',
+                    okText: '{{ i18n "import" }}',
+                    confirm: async (text) => {
+                        let parsed;
+                        try {
+                            parsed = JSON.parse(text);
+                        } catch (e) {
+                            app.$message.error('{{ i18n "importInvalid" }}');
+                            return;
+                        }
+                        let list = null;
+                        if (Array.isArray(parsed)) {
+                            list = parsed;
+                        } else if (parsed && Array.isArray(parsed.outbounds)) {
+                            list = parsed.outbounds;
+                        }
+                        if (!list || list.length === 0) {
+                            app.$message.error('{{ i18n "importInvalid" }}');
+                            return;
+                        }
+                        promptModal.loading(true);
+                        let ok = 0;
+                        for (const ob of list) {
+                            try {
+                                const db = new DBOutbound();
+                                const data = DBOutbound.payloadFromOutbound(Outbound.fromJson(ob), db);
+                                const msg = await HttpUtil.post('/xui/outbound/add', data);
+                                if (msg.success) ok++;
+                            } catch (e) {
+                                console.error('import outbound failed', e);
+                            }
+                        }
+                        promptModal.loading(false);
+                        promptModal.close();
+                        app.$message.success(ok + ' / ' + list.length);
+                        await this.getDBOutbounds();
+                    },
+                });
+            },
+            async testOutbound(id) {
+                this.$set(this.testResults, id, { testing: true });
+                const msg = await HttpUtil.post('/xui/outbound/test', { id });
+                if (!msg.success || !msg.obj) {
+                    this.$set(this.testResults, id, { testing: false, success: false, message: msg.msg });
+                    return;
+                }
+                const r = msg.obj;
+                this.$set(this.testResults, r.id, { testing: false, success: r.success, delay: r.delay, message: r.message });
+            },
+            async testAllOutbounds() {
+                if (this.testingAll) {
+                    return;
+                }
+                this.testingAll = true;
+                await Promise.all(this.dbOutbounds.map(o => this.testOutbound(o.id)));
+                this.testingAll = false;
+            },
+            async submit(url, data, modal) {
+                const msg = await HttpUtil.postWithModal(url, data, modal);
+                if (msg.success) {
+                    await this.getDBOutbounds();
+                }
+            },
+            async startDataRefreshLoop() {
+                while (this.isRefreshEnabled) {
+                    try {
+                        await this.getDBOutbounds();
+                    } catch (e) {
+                        console.error(e);
+                    }
+                    await PromiseUtil.sleep(this.refreshInterval);
+                }
+            },
+            toggleRefresh() {
+                localStorage.setItem("isRefreshEnabled", this.isRefreshEnabled);
+                if (this.isRefreshEnabled) {
+                    this.startDataRefreshLoop();
+                }
+            },
+            changeRefreshInterval() {
+                localStorage.setItem("refreshInterval", this.refreshInterval);
+            },
+            async manualRefresh() {
+                if (!this.refreshing) {
+                    this.loading(true);
+                    await this.getDBOutbounds();
+                    this.loading(false);
+                }
+            },
+            pagination(obj) {
+                if (this.pageSize > 0 && obj.length > this.pageSize) {
+                    const sizeOptions = [];
+                    for (let i = this.pageSize; i <= obj.length; i += this.pageSize) {
+                        sizeOptions.push(i.toString());
+                    }
+                    sizeOptions.push(obj.length.toString());
+                    return {
+                        showSizeChanger: true,
+                        size: 'small',
+                        position: 'bottom',
+                        pageSize: this.pageSize,
+                        pageSizeOptions: sizeOptions,
+                    };
+                }
+                return false;
+            },
+            onResize() {
+                this.isMobile = window.innerWidth <= 768;
+            },
+        },
+        watch: {
+            searchKey: debounce(function () {
+                this.applyOutboundFilter();
+            }, 500),
+        },
+        computed: {
+            total() {
+                let up = 0, down = 0;
+                this.dbOutbounds.forEach(o => { up += o.up; down += o.down; });
+                return { up, down };
+            },
+        },
+        mounted() {
+            if (window.location.protocol !== "https:") {
+                this.showAlert = true;
+            }
+            window.addEventListener('resize', this.onResize);
+            this.onResize();
+            this.loading();
+            this.getClientReverseTags();
+            if (this.isRefreshEnabled) {
+                this.startDataRefreshLoop();
+            } else {
+                this.getDBOutbounds();
+            }
+            this.loading(false);
+        },
+    });
+</script>
+{{template "outboundModal"}}
+{{template "warpModal"}}
+{{template "promptModal"}}
+{{template "textModal"}}
+</body>
+</html>

@@ -1,0 +1,38 @@
+{{define "js"}}
+<script src="{{ .base_path }}assets/vue/vue.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/moment/moment.min.js"></script>
+<script src="{{ .base_path }}assets/ant-design-vue@1.7.8/antd.min.js"></script>
+<script src="{{ .base_path }}assets/axios/axios.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/qs/qs.min.js"></script>
+<script src="{{ .base_path }}assets/js/axios-init.js"></script>
+<script src="{{ .base_path }}assets/js/util/common.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/util/date-util.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/util/utils.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/langs.js"></script>
+<script>
+    const a11yIconLabels = {
+        'plus': '{{ i18n "a11y.add" }}',
+        'minus': '{{ i18n "a11y.remove" }}',
+        'delete': '{{ i18n "delete" }}',
+        'edit': '{{ i18n "edit" }}',
+        'copy': '{{ i18n "copy" }}',
+        'download': '{{ i18n "a11y.download" }}',
+        'sync': '{{ i18n "a11y.regenerate" }}',
+        'more': '{{ i18n "a11y.moreActions" }}',
+        'ellipsis': '{{ i18n "a11y.moreActions" }}',
+        'menu': '{{ i18n "pages.inbounds.generalActions" }}',
+        'close': '{{ i18n "close" }}',
+        'close-circle': '{{ i18n "close" }}',
+        'eye': '{{ i18n "a11y.showPassword" }}',
+        'eye-invisible': '{{ i18n "a11y.hidePassword" }}',
+        'qrcode': '{{ i18n "qrCode" }}',
+        'info-circle': '{{ i18n "info" }}',
+        'search': '{{ i18n "search" }}',
+    };
+</script>
+<script src="{{ .base_path }}assets/js/a11y.js?{{ .cur_ver }}"></script>
+<script>
+    const basePath = '{{ .base_path }}';
+    axios.defaults.baseURL = basePath;
+</script>
+{{end}}

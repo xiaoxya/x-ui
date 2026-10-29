@@ -1,0 +1,138 @@
+{{define "dnsModal"}}
+<a-modal id="dns-modal" v-model="dnsModal.visible" :title="dnsModal.title" @ok="dnsModal.ok" :closable="true"
+  :mask-closable="false" :ok-text="dnsModal.okText" cancel-text='{{ i18n "close" }}'
+  :class="themeSwitcher.currentTheme">
+  <a-form :colon="false" :label-col="{ md: {span:8} }" :wrapper-col="{ md: {span:14} }">
+    <a-form-item>
+      <template slot="label">
+        <a-tooltip>
+          <template slot="title">
+            <span>{{ i18n "pages.xray.dns.idDesc" }}</span>
+          </template>
+          ID <a-icon type="question-circle"></a-icon>
+        </a-tooltip>
+      </template>
+      <a-input v-model.trim="dnsModal.dnsServer.id"></a-input>
+    </a-form-item>
+    <a-form-item label='{{ i18n "address" }}'>
+      <a-input v-model.trim="dnsModal.dnsServer.address"></a-input>
+    </a-form-item>
+    <!-- a DNS script picks the server itself; the core refuses domains and skipFallback next to it -->
+    <a-form-item label='{{ i18n "pages.xray.dns.domains" }}' v-if="!dnsModal.scriptActive">
+      <a-button icon="plus" size="small" type="primary" @click="dnsModal.dnsServer.domains.push('')"></a-button>
+      <template v-for="(domain, index) in dnsModal.dnsServer.domains">
+        <a-input v-model.trim="dnsModal.dnsServer.domains[index]">
+          <a-button icon="minus" size="small" slot="addonAfter"
+            @click="dnsModal.dnsServer.domains.splice(index,1)"></a-button>
+        </a-input>
+      </template>
+    </a-form-item>
+    <a-form-item label='{{ i18n "pages.xray.dns.strategy" }}' v-if="isAdvanced">
+      <a-select v-model="dnsModal.dnsServer.queryStrategy" style="width: 100%"
+        :dropdown-class-name="themeSwitcher.currentTheme">
+        <a-select-option :value="l" :label="l" v-for="l in ['UseIP', 'UseIPv4', 'UseIPv6']"> [[ l ]] </a-select-option>
+      </a-select>
+    </a-form-item>
+    <a-form-item label='{{ i18n "pages.xray.dns.skipFallback" }}' v-if="isAdvanced">
+      <a-switch v-model="dnsModal.dnsServer.skipFallback"></a-switch>
+    </a-form-item>
+    <a-form-item label='{{ i18n "pages.xray.dns.expectIPs"}}'>
+      <a-button icon="plus" size="small" type="primary" @click="dnsModal.dnsServer.expectIPs.push('')"></a-button>
+      <template v-for="(domain, index) in dnsModal.dnsServer.expectIPs">
+        <a-input v-model.trim="dnsModal.dnsServer.expectIPs[index]">
+          <a-button icon="minus" size="small" slot="addonAfter"
+            @click="dnsModal.dnsServer.expectIPs.splice(index,1)"></a-button>
+        </a-input>
+      </template>
+    </a-form-item>
+  </a-form>
+</a-modal>
+<script>
+  const dnsModal = {
+    title: '',
+    visible: false,
+    okText: '{{ i18n "confirm" }}',
+    isEdit: false,
+    confirm: null,
+    scriptActive: false,
+    dnsServer: {
+      id: '',
+      address: "localhost",
+      domains: [],
+      expectIPs: [],
+      queryStrategy: 'UseIP',
+      skipFallback: true,
+    },
+    ok() {
+      domains = dnsModal.scriptActive ? [] : dnsModal.dnsServer.domains.filter(d => d.length > 0);
+      expectIPs = dnsModal.dnsServer.expectIPs.filter(ip => ip.length > 0);
+      dnsModal.dnsServer.domains = domains;
+      dnsModal.dnsServer.expectIPs = expectIPs;
+      if (!dnsModal.dnsServer.id) delete dnsModal.dnsServer.id;
+      if (dnsModal.scriptActive) {
+        delete dnsModal.dnsServer.skipFallback;
+        delete dnsModal.dnsServer.finalQuery;
+      }
+      // a bare address string cannot carry the id a DNS script looks servers up by
+      newDnsServer = (domains.length > 0 || expectIPs.length > 0 || dnsModal.dnsServer.id) ? dnsModal.dnsServer : dnsModal.dnsServer.address;
+      ObjectUtil.execute(dnsModal.confirm, newDnsServer);
+    },
+
+    show({
+      title = '',
+      okText = '{{ i18n "confirm" }}',
+      dnsServer,
+      confirm = (dnsServer) => { },
+      isEdit = false,
+      scriptActive = false,
+    }) {
+      this.scriptActive = scriptActive;
+      this.title = title;
+      this.okText = okText;
+      this.confirm = confirm;
+      this.visible = true;
+      if (isEdit) {
+        if (typeof dnsServer == 'object') {
+          this.dnsServer = { id: '', domains: [], expectIPs: [], ...dnsServer };
+        } else {
+          this.dnsServer = {
+            id: '',
+            address: dnsServer ?? "",
+            domains: [],
+            expectIPs: [],
+            queryStrategy: 'UseIP',
+            skipFallback: true,
+          }
+        }
+      } else {
+        this.dnsServer = {
+          id: '',
+          address: "localhost",
+          domains: [],
+          expectIPs: [],
+          queryStrategy: 'UseIP',
+          skipFallback: true,
+        }
+      }
+      this.isEdit = isEdit;
+    },
+    close() {
+      dnsModal.visible = false;
+    },
+  };
+  new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#dns-modal',
+    data: {
+      dnsModal: dnsModal,
+    },
+    computed: {
+      isAdvanced: {
+        get: function () {
+          return dnsModal.dnsServer.domains.length > 0;
+        }
+      }
+    }
+  });
+</script>
+{{end}}

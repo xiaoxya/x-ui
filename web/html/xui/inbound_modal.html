@@ -1,0 +1,336 @@
+{{define "inboundModal"}}
+<a-modal id="inbound-modal" v-model="inModal.visible" :title="inModal.title" @ok="inModal.ok"
+         :confirm-loading="inModal.confirmLoading" :closable="true" :mask-closable="false"
+         width="800px" body-style="padding: 0;"
+         :ok-text="inModal.okText" cancel-text='{{ i18n "close" }}' :class="themeSwitcher.currentTheme">
+    {{template "form/inbound"}}
+</a-modal>
+<script>
+
+    const inboundCmOptions = {
+        lineNumbers: true,
+        mode: "application/json",
+        lint: true,
+        theme: "xq",
+        lineWrapping: true,
+        indentUnit: 2,
+        tabSize: 2,
+        screenReaderLabel: "JSON",
+    };
+
+    const inModal = {
+        title: '',
+        visible: false,
+        confirmLoading: false,
+        okText: '{{ i18n "confirm" }}',
+        isEdit: false,
+        confirm: null,
+        inbound: new Inbound(),
+        dbInbound: new DBInbound(),
+        activeKey: 'in-basic',
+        cm: null,
+        ok() {
+            ObjectUtil.execute(inModal.confirm, inModal.inbound, inModal.dbInbound);
+        },
+        onTabChange(activeKey) {
+            this.activeKey = activeKey;
+            if (activeKey === 'in-json') {
+                setTimeout(() => this.initJsonEditor(), 0);
+            } else {
+                this.destroyJsonEditor();
+            }
+        },
+        initJsonEditor() {
+            const textAreaObj = document.getElementById('inboundJson');
+            if (!textAreaObj) return;
+            this.destroyJsonEditor();
+            let inbJson = this.inbound.toJson();
+            // Clients are managed from the client table, not from here. Hold on to
+            // their serialized form and put it back on every edit, otherwise
+            // re-parsing the edited JSON would drop them.
+            const clients = inbJson.settings.clients;
+            delete inbJson.settings.clients;
+            delete inbJson.clientStats;
+            delete inbJson.tag;
+            textAreaObj.value = JSON.stringify(inbJson, null, 2);
+            this.cm = CodeMirror.fromTextArea(textAreaObj, inboundCmOptions);
+            this.cm.on('change', editor => {
+                const value = editor.getValue();
+                if (this.isJsonString(value)) {
+                    newJson = JSON.parse(value);
+                    newJson.settings.clients = clients;
+                    newJson.clientStats = this.inbound.clientStats;
+                    newJson.tag = this.inbound.tag;
+                    this.inbound = Inbound.fromJson(newJson);
+                }
+            });
+        },
+        destroyJsonEditor() {
+            if (this.cm != null) {
+                this.cm.toTextArea();
+                this.cm = null;
+            }
+        },
+        isJsonString(str) {
+            try {
+                JSON.parse(str);
+            } catch (e) {
+                return false;
+            }
+            return true;
+        },
+        show({ title='', okText='{{ i18n "confirm" }}', inbound=null, dbInbound=null, confirm=(inbound, dbInbound)=>{}, isEdit=false  }) {
+            this.title = title;
+            this.okText = okText;
+            this.activeKey = 'in-basic';
+            this.destroyJsonEditor();
+            if (inbound) {
+                this.inbound = Inbound.fromJson(inbound.toJson());
+            } else {
+                this.inbound = new Inbound();
+            }
+            if (this.inbound.protocol === Protocols.VLESS && this.inbound.settings) {
+                if (!this.inbound.settings.testseed || !Array.isArray(this.inbound.settings.testseed) || this.inbound.settings.testseed.length < 4) {
+                    this.inbound.settings.testseed = [900, 500, 900, 256].slice();
+                }
+            }
+            if (dbInbound) {
+                this.dbInbound = new DBInbound(dbInbound);
+            } else {
+                this.dbInbound = new DBInbound();
+            }
+            this.confirm = confirm;
+            this.visible = true;
+            this.isEdit = isEdit;
+        },
+        close() {
+            inModal.visible = false;
+            inModal.loading(false);
+        },
+        loading(loading=true) {
+            inModal.confirmLoading = loading;
+        },
+        updateTestseed(index, value) {
+            if (!inModal.inbound || !inModal.inbound.settings) return;
+            if (!inModal.inbound.settings.testseed || !Array.isArray(inModal.inbound.settings.testseed)) {
+                inModal.inbound.settings.testseed = [900, 500, 900, 256];
+            }
+            while (inModal.inbound.settings.testseed.length <= index) {
+                inModal.inbound.settings.testseed.push(0);
+            }
+            inModal.inbound.settings.testseed[index] = value;
+        },
+        setRandomTestseed() {
+            if (!inModal.inbound || !inModal.inbound.settings) return;
+            if (!inModal.inbound.settings.testseed || !Array.isArray(inModal.inbound.settings.testseed) || inModal.inbound.settings.testseed.length < 4) {
+                inModal.inbound.settings.testseed = [900, 500, 900, 256].slice();
+            }
+            inModal.inbound.settings.testseed = [Math.floor(Math.random()*1000), Math.floor(Math.random()*1000), Math.floor(Math.random()*1000), Math.floor(Math.random()*1000)];
+        },
+        resetTestseed() {
+            if (!inModal.inbound || !inModal.inbound.settings) return;
+            inModal.inbound.settings.testseed = [900, 500, 900, 256].slice();
+        }
+    };
+
+    new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#inbound-modal',
+        data: {
+            inModal: inModal,
+            delayedStart: false,
+            get inbound() {
+                return inModal.inbound;
+            },
+            get dbInbound() {
+                return inModal.dbInbound;
+            },
+            get isEdit() {
+                return inModal.isEdit;
+            },
+            get client() {
+                return inModal.inbound.clients[0];
+            },
+            get delayedExpireDays() {
+                return this.client && this.client.expiryTime < 0 ? this.client.expiryTime / -86400000 : 0;
+            },
+            set delayedExpireDays(days){
+                this.client.expiryTime = -86400000 * days;
+            },
+            get externalProxy() {
+                return this.inbound.stream.externalProxy.length > 0;
+            },
+            set externalProxy(value) {
+                if (value) {
+                    inModal.inbound.stream.externalProxy = [{
+                        forceTls: "same",
+                        dest: window.location.hostname,
+                        port: inModal.inbound.port,
+                        remark: ""
+                    }];
+                } else {
+                    inModal.inbound.stream.externalProxy = [];
+                }
+            }
+        },
+        methods: {
+            streamNetworkChange() {
+                if (!inModal.inbound.canEnableTls()) {
+                    this.inModal.inbound.stream.security = 'none';
+                }
+                if (!inModal.inbound.canEnableReality()) {
+                    this.inModal.inbound.stream.isReality = false;
+                }
+                if (this.inModal.inbound.protocol == Protocols.VLESS && !inModal.inbound.canEnableTlsFlow()) {
+                    this.inModal.inbound.settings.vlesses.forEach(client => {
+                        client.flow = "";
+                    });
+                }
+                if (inModal.inbound.stream.network != 'kcp') {
+                    inModal.inbound.stream.finalmask.udp = [];
+                }
+            },
+            SSMethodChange() {
+                if (this.inModal.inbound.isSSMultiUser) {
+                    if (this.inModal.inbound.settings.shadowsockses.length ==0){
+                        this.inModal.inbound.settings.shadowsockses = [new Inbound.ShadowsocksSettings.Shadowsocks(
+                            '', RandomUtil.randomShadowsocksPassword(this.inModal.inbound.settings.method))];
+                    }
+                    if (!this.inModal.inbound.isSS2022) {
+                        this.inModal.inbound.settings.shadowsockses.forEach(client => {
+                            client.method = this.inModal.inbound.settings.method;
+                        })
+                    } else {
+                        this.inModal.inbound.settings.shadowsockses.forEach(client => {
+                            client.method = "";
+                        })
+                    }
+                } else {
+                    if (this.inModal.inbound.settings.shadowsockses.length > 0){
+                        this.inModal.inbound.settings.shadowsockses = [];
+                    }
+                }
+                this.inModal.inbound.settings.fitKeys();
+            },
+            setDefaultCertData(index){
+                inModal.inbound.stream.tls.certs[index].certFile = app.defaultCert;
+                inModal.inbound.stream.tls.certs[index].keyFile = app.defaultKey;
+            },
+            async getNewX25519Cert(){
+                inModal.loading(true);
+                const msg = await HttpUtil.get('/server/getNewX25519Cert');
+                inModal.loading(false);
+                if (!msg.success) {
+                    return;
+                }
+                inModal.inbound.stream.reality.privateKey = msg.obj.privateKey;
+                inModal.inbound.stream.reality.settings.publicKey = msg.obj.publicKey;
+            },
+            clearX25519Cert() {
+                this.inbound.stream.reality.privateKey = '';
+                this.inbound.stream.reality.settings.publicKey = '';
+            },
+            async getNewmldsa65() {
+                inModal.loading(true);
+                const msg = await HttpUtil.get('/server/getNewmldsa65');
+                inModal.loading(false);
+                if (!msg.success) {
+                    return;
+                }
+                inModal.inbound.stream.reality.mldsa65Seed = msg.obj.seed;
+                inModal.inbound.stream.reality.settings.mldsa65Verify = msg.obj.verify;
+            },
+            clearMldsa65() {
+                this.inbound.stream.reality.mldsa65Seed = '';
+                this.inbound.stream.reality.settings.mldsa65Verify = '';
+            },
+            async getNewEchCert() {
+                inModal.loading(true);
+                const msg = await HttpUtil.post('/server/getNewEchCert', {sni: inModal.inbound.stream.tls.sni});
+                inModal.loading(false);
+                if (!msg.success) {
+                    return;
+                }
+                inModal.inbound.stream.tls.echServerKeys = msg.obj.echServerKeys;
+                inModal.inbound.stream.tls.settings.echConfigList = msg.obj.echConfigList;
+            },
+            clearEchCert() {
+                this.inbound.stream.tls.echServerKeys = '';
+                this.inbound.stream.tls.settings.echConfigList = '';
+            },
+            async getNewSelfSignedCert(index) {
+                const cert = inModal.inbound.stream.tls.certs[index];
+                if (!cert) return;
+                inModal.loading(true);
+                const msg = await HttpUtil.post('/server/getNewSelfSignedCert', {sni: inModal.inbound.stream.tls.sni});
+                inModal.loading(false);
+                if (!msg.success) {
+                    return;
+                }
+                cert.useFile = false;
+                cert.cert = msg.obj.cert;
+                cert.key = msg.obj.key;
+            },
+            async getCertHash() {
+                const cert = inModal.inbound.stream.tls.certs[0];
+                if (!cert) return;
+                inModal.loading(true);
+                const msg = await HttpUtil.post('/server/getCertHash', {
+                    certFile: cert.useFile ? cert.certFile : '',
+                    certContent: cert.useFile ? '' : cert.cert,
+                });
+                inModal.loading(false);
+                if (!msg.success) {
+                    return;
+                }
+                const arr = inModal.inbound.stream.tls.settings.pinnedPeerCertSha256 || [];
+                (msg.obj || []).forEach(h => { if (h && !arr.includes(h)) arr.push(h); });
+                inModal.inbound.stream.tls.settings.pinnedPeerCertSha256 = [...arr];
+            },
+            async getNewVlessEnc() {
+                inModal.loading(true);
+                const msg = await HttpUtil.get('/server/getNewVlessEnc');
+                inModal.loading(false);
+
+                if (!msg.success) {
+                    return;
+                }
+
+                const auths = msg.obj.auths || [];
+                const selected = inModal.inbound.settings.selectedAuth;
+                const block = auths.find(a => a.label === selected);
+
+                if (!block) {
+                    console.error("No auth block for", selected);
+                    return;
+                }
+
+                inModal.inbound.settings.decryption = block.decryption;
+                inModal.inbound.settings.encryption = block.encryption;
+            },
+            clearVlessEnc() {
+                this.inbound.settings.decryption = 'none';
+                this.inbound.settings.encryption = 'none';
+                this.inbound.settings.selectedAuth = undefined;
+            },
+            updateTestseed(index, value) {
+                if (!this.inbound.settings.testseed || !Array.isArray(this.inbound.settings.testseed)) {
+                    this.$set(this.inbound.settings, 'testseed', [900, 500, 900, 256]);
+                }
+                while (this.inbound.settings.testseed.length <= index) {
+                    this.inbound.settings.testseed.push(0);
+                }
+                this.$set(this.inbound.settings.testseed, index, value);
+            },
+            setRandomTestseed() {
+                const newSeed = [Math.floor(Math.random()*1000), Math.floor(Math.random()*1000), Math.floor(Math.random()*1000), Math.floor(Math.random()*1000)];
+                this.$set(this.inbound.settings, 'testseed', newSeed);
+            },
+            resetTestseed() {
+                this.$set(this.inbound.settings, 'testseed', [900, 500, 900, 256]);
+            }
+        },
+    });
+
+</script>
+{{end}}

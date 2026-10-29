@@ -1,0 +1,198 @@
+{{define "qrcodeModal"}}
+<style>
+#qrcode-modal .ant-modal {
+    max-width: 95vw;
+}
+#qrcode-modal .ant-collapse {
+    background: transparent;
+}
+#qrcode-modal .ant-collapse-content-box {
+    padding: 10px 14px 14px;
+}
+.qr-panel-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+.qr-panel-canvas {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.qr-panel-canvas canvas {
+    max-width: 100%;
+    display: block;
+    margin: 0 auto;
+    border-radius: 0px;
+    cursor: pointer;
+}
+</style>
+<a-modal id="qrcode-modal" v-model="qrModal.visible" :title="qrModal.title"
+         :closable="true"
+         :footer="null"
+         width="560px" :class="themeSwitcher.currentTheme">
+    <a-collapse v-model="qrModal.activeKey">
+        <template v-if="app.subSettings.enable && qrModal.subId">
+            <!-- MASQUE has no share link format, so only the JSON subscription carries it -->
+            <a-collapse-panel v-if="qrModal.dbInbound.protocol !== Protocols.MASQUE" key="sub" :force-render="true">
+                <span slot="header">{{ i18n "pages.settings.subSettings" }}</span>
+                <div class="qr-panel-actions">
+                    <a-button size="small" icon="copy" @click.stop="copyToClipboard(genSubLink(qrModal.subId))"></a-button>
+                    <a-button size="small" icon="download" @click.stop="downloadQrCode('qrCode-sub', 'sub')"></a-button>
+                </div>
+                <div class="qr-panel-canvas">
+                    <canvas id="qrCode-sub" @click="copyToClipboard(genSubLink(qrModal.subId))"></canvas>
+                </div>
+            </a-collapse-panel>
+            <a-collapse-panel key="mihomo" :force-render="true">
+                <span slot="header">Clash/Mihomo</span>
+                <div class="qr-panel-actions">
+                    <a-button size="small" icon="copy" @click.stop="copyToClipboard(genMihomoLink(qrModal.subId))"></a-button>
+                    <a-button size="small" icon="download" @click.stop="downloadQrCode('qrCode-mihomo', 'mihomo')"></a-button>
+                </div>
+                <div class="qr-panel-canvas"><canvas id="qrCode-mihomo" @click="copyToClipboard(genMihomoLink(qrModal.subId))"></canvas></div>
+            </a-collapse-panel>
+            <a-collapse-panel key="singbox" :force-render="true">
+                <span slot="header">sing-box JSON</span>
+                <div class="qr-panel-actions">
+                    <a-button size="small" icon="copy" @click.stop="copyToClipboard(genSingboxLink(qrModal.subId))"></a-button>
+                    <a-button size="small" icon="download" @click.stop="downloadQrCode('qrCode-singbox', 'singbox')"></a-button>
+                </div>
+                <div class="qr-panel-canvas"><canvas id="qrCode-singbox" @click="copyToClipboard(genSingboxLink(qrModal.subId))"></canvas></div>
+            </a-collapse-panel>
+            <a-collapse-panel key="subJson" :force-render="true">
+                <span slot="header">{{ i18n "pages.settings.subSettings" }} JSON</span>
+                <div class="qr-panel-actions">
+                    <a-button size="small" icon="copy" @click.stop="copyToClipboard(genSubJsonLink(qrModal.subId))"></a-button>
+                    <a-button size="small" icon="download" @click.stop="downloadQrCode('qrCode-subJson', 'sub-json')"></a-button>
+                </div>
+                <div class="qr-panel-canvas">
+                    <canvas id="qrCode-subJson" @click="copyToClipboard(genSubJsonLink(qrModal.subId))"></canvas>
+                </div>
+            </a-collapse-panel>
+        </template>
+        <a-collapse-panel v-for="(row, index) in qrModal.qrcodes" :key="'qr-' + index" :force-render="true">
+            <span slot="header">[[ row.remark ]]</span>
+            <div class="qr-panel-actions">
+                <a-button size="small" icon="copy" @click.stop="copyToClipboard(row.link)"></a-button>
+                <a-button v-if="row.conf" size="small" icon="download" @click.stop="downloadConfFile(row.link, row.conf)"></a-button>
+                <a-button v-else size="small" icon="download" @click.stop="downloadQrCode('qrCode-' + index, row.remark)"></a-button>
+            </div>
+            <div class="qr-panel-canvas">
+                <canvas @click="copyToClipboard(row.link)" :id="'qrCode-' + index"></canvas>
+            </div>
+        </a-collapse-panel>
+    </a-collapse>
+</a-modal>
+
+<script>
+
+    const qrModal = {
+        title: '',
+        dbInbound: new DBInbound(),
+        client: null,
+        qrcodes: [],
+        clipboard: null,
+        visible: false,
+        subId: '',
+        activeKey: [],
+        show: function (title = '', dbInbound, client) {
+            this.title = title;
+            this.dbInbound = dbInbound;
+            this.inbound = dbInbound.toInbound();
+            this.client = client;
+            this.subId = '';
+            this.qrcodes = [];
+            this.activeKey = [];
+            // A wireguard peer gets a config file rather than a URI, so offer it
+            // as a download; everything else is a plain link.
+            const isWireguard = this.inbound.protocol == Protocols.WIREGUARD;
+            this.inbound.genAllLinks(this.dbInbound.remark, app.remarkModel, client).forEach(l => {
+                this.qrcodes.push({
+                    remark: l.remark,
+                    link: l.link,
+                    conf: isWireguard ? (l.remark || dbInbound.tag).replace(/[^\w.-]+/g, '_') + '.conf' : undefined,
+                });
+            });
+            if (this.qrcodes.length > 0) {
+                this.activeKey = [];
+            }
+            this.visible = true;
+        },
+        close: function () {
+            this.visible = false;
+        },
+    };
+
+    const qrModalApp = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#qrcode-modal',
+        data: {
+            qrModal: qrModal,
+        },
+        methods: {
+            copyToClipboard(content) {
+                ClipboardUtil.copyToClipboard(content).then(success => {
+                    if (success) {
+                        app.$message.success('{{ i18n "copied" }}');
+                    }
+                });
+            },
+            downloadConfFile(content, filename) {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = filename;
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+            },
+            downloadQrCode(elementId, name) {
+                const canvas = document.querySelector('#' + elementId);
+                if (!canvas) return;
+                const link = document.createElement('a');
+                link.download = (name || 'qrcode') + '.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            },
+            setQrCode(elementId, content) {
+                const canvas = document.querySelector('#' + elementId);
+                if (!canvas) return;
+                new QRious({
+                    element: canvas,
+                    size: 510,
+                    value: content,
+                    padding: 0,
+                    
+                });
+            },
+            genSubLink(subID) {
+                return app.subSettings.subURI+subID+'?name='+subID;
+            },
+            genMihomoLink(subID) {
+                return app.subSettings.subURI + encodeURIComponent(subID) + '/mihomo';
+            },
+            genSingboxLink(subID) {
+                return app.subSettings.subURI + encodeURIComponent(subID) + '/singbox';
+            },
+            genSubJsonLink(subID) {
+                return app.subSettings.subJsonURI+subID;
+            }
+        },
+        updated() {
+            if (qrModal.client && qrModal.client.subId) {
+                qrModal.subId = qrModal.client.subId;
+                this.setQrCode("qrCode-sub", this.genSubLink(qrModal.subId));
+                this.setQrCode("qrCode-subJson", this.genSubJsonLink(qrModal.subId));
+                this.setQrCode("qrCode-singbox", this.genSingboxLink(qrModal.subId));
+                this.setQrCode("qrCode-mihomo", this.genMihomoLink(qrModal.subId));
+            }
+            qrModal.qrcodes.forEach((element, index) => {
+                this.setQrCode("qrCode-" + index, element.link);
+            });
+        }
+    });
+
+</script>
+{{end}}

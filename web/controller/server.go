@@ -1,0 +1,339 @@
+package controller
+
+import (
+	"fmt"
+	"net/http"
+	"regexp"
+	"time"
+
+	"github.com/alireza0/x-ui/web/global"
+	"github.com/alireza0/x-ui/web/network"
+	"github.com/alireza0/x-ui/web/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+var filenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-.]+$`)
+
+type ServerController struct {
+	BaseController
+
+	serverService service.ServerService
+
+	lastStatus        *service.Status
+	lastGetStatusTime time.Time
+
+	lastVersions        []string
+	lastGetVersionsTime time.Time
+}
+
+func NewServerController(g *gin.RouterGroup) *ServerController {
+	a := &ServerController{
+		lastGetStatusTime: time.Now(),
+	}
+	a.initRouter(g)
+	a.startTask()
+	return a
+}
+
+func (a *ServerController) initRouter(g *gin.RouterGroup) {
+	g = g.Group("/server")
+
+	g.Use(a.checkLogin)
+	g.GET("/status", a.status)
+	g.GET("/portHopStatus", a.portHopStatus)
+	g.GET("/tunnels", a.tunnelStatus)
+	g.POST("/tunnel/start", a.startTunnel)
+	g.POST("/tunnel/stop", a.stopTunnel)
+	g.POST("/syncPortHop", a.syncPortHop)
+	g.POST("/autoPortHop", a.autoPortHop)
+	g.GET("/getDb", a.getDb)
+	g.GET("/getConfigJson", a.getConfigJson)
+	g.GET("/getNewmldsa65", a.getNewmldsa65)
+	g.GET("/getNewVlessEnc", a.getNewVlessEnc)
+	g.GET("/getXrayVersion", a.getXrayVersion)
+	g.GET("/getNewX25519Cert", a.getNewX25519Cert)
+
+	g.POST("/getNewEchCert", a.getNewEchCert)
+	g.POST("/getNewSelfSignedCert", a.getNewSelfSignedCert)
+	g.POST("/getCertHash", a.getCertHash)
+	g.POST("/getTlsPing", a.getTlsPing)
+	g.POST("/getMinecraftProfile", a.getMinecraftProfile)
+	g.POST("/stopXrayService", a.stopXrayService)
+	g.POST("/restartXrayService", a.restartXrayService)
+	g.POST("/installXray/:version", a.installXray)
+	g.POST("/uploadXray", a.uploadXray)
+	g.POST("/logs/:count", a.getLogs)
+	g.POST("/importDB", a.importDB)
+}
+
+func (a *ServerController) refreshStatus() {
+	a.lastStatus = a.serverService.GetStatus(a.lastStatus)
+}
+
+func (a *ServerController) startTask() {
+	webServer := global.GetWebServer()
+	c := webServer.GetCron()
+	c.AddFunc("@every 2s", func() {
+		now := time.Now()
+		if now.Sub(a.lastGetStatusTime) > time.Minute*3 {
+			return
+		}
+		a.refreshStatus()
+	})
+}
+
+func (a *ServerController) tunnelStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	jsonObj(c, service.TunnelStatuses(), nil)
+}
+func (a *ServerController) startTunnel(c *gin.Context) {
+	var form service.TunnelConfig
+	if err := c.ShouldBind(&form); err != nil {
+		jsonMsg(c, "Tunnel start", err)
+		return
+	}
+	if err := service.StartTunnel(form); err != nil {
+		jsonMsg(c, "Tunnel start", err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	jsonObj(c, service.TunnelStatuses(), nil)
+}
+func (a *ServerController) stopTunnel(c *gin.Context) {
+	var form struct {
+		Mode string `json:"mode" form:"mode"`
+	}
+	if err := c.ShouldBind(&form); err != nil {
+		jsonMsg(c, "Tunnel stop", err)
+		return
+	}
+	if err := service.StopTunnel(form.Mode); err != nil {
+		jsonMsg(c, "Tunnel stop", err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	jsonObj(c, service.TunnelStatuses(), nil)
+}
+
+func (a *ServerController) portHopStatus(c *gin.Context) { jsonObj(c, service.GetPortHopStatus(), nil) }
+func (a *ServerController) autoPortHop(c *gin.Context) {
+	var form struct {
+		Enabled *bool `json:"enabled" form:"enabled"`
+	}
+	if err := c.ShouldBind(&form); err != nil || form.Enabled == nil {
+		jsonMsg(c, "Automatic port hop", fmt.Errorf("enabled is required"))
+		return
+	}
+	if err := service.SetAutoPortHopEnabled(*form.Enabled); err != nil {
+		jsonMsg(c, "Automatic port hop", err)
+		return
+	}
+	jsonObj(c, service.GetPortHopStatus(), nil)
+}
+func (a *ServerController) syncPortHop(c *gin.Context) {
+	if err := service.SyncPortHop(true); err != nil {
+		jsonMsg(c, "Port hop sync", err)
+		return
+	}
+	jsonObj(c, service.GetPortHopStatus(), nil)
+}
+
+func (a *ServerController) status(c *gin.Context) {
+	a.lastGetStatusTime = time.Now()
+
+	jsonObj(c, a.lastStatus, nil)
+}
+
+func (a *ServerController) getXrayVersion(c *gin.Context) {
+	now := time.Now()
+	if now.Sub(a.lastGetVersionsTime) <= time.Minute {
+		jsonObj(c, a.lastVersions, nil)
+		return
+	}
+
+	versions, err := a.serverService.GetXrayVersions()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "getVersion"), err)
+		return
+	}
+
+	a.lastVersions = versions
+	a.lastGetVersionsTime = time.Now()
+
+	jsonObj(c, versions, nil)
+}
+
+func (a *ServerController) installXray(c *gin.Context) {
+	version := c.Param("version")
+	err := a.serverService.UpdateXray(version)
+	jsonMsg(c, I18nWeb(c, "install")+" xray", err)
+}
+
+func (a *ServerController) uploadXray(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<20+1<<20)
+	file, _, err := c.Request.FormFile("core")
+	if err != nil {
+		jsonMsg(c, "Upload Xray", err)
+		return
+	}
+	defer file.Close()
+	err = a.serverService.InstallXrayUpload(file)
+	jsonMsg(c, "Upload Xray", err)
+}
+
+func (a *ServerController) stopXrayService(c *gin.Context) {
+	a.lastGetStatusTime = time.Now()
+	err := a.serverService.StopXrayService()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonMsg(c, "Xray stopped", err)
+}
+
+func (a *ServerController) restartXrayService(c *gin.Context) {
+	err := a.serverService.RestartXrayService()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonMsg(c, "Xray restarted", err)
+}
+
+func (a *ServerController) getLogs(c *gin.Context) {
+	count := c.Param("count")
+	level := c.PostForm("level")
+	syslog := c.PostForm("syslog")
+	logs := a.serverService.GetLogs(count, level, syslog)
+	jsonObj(c, logs, nil)
+}
+
+func (a *ServerController) getConfigJson(c *gin.Context) {
+	configJson, err := a.serverService.GetConfigJson()
+	if err != nil {
+		jsonMsg(c, "get config.json", err)
+		return
+	}
+	jsonObj(c, configJson, nil)
+}
+
+func (a *ServerController) getDb(c *gin.Context) {
+	db, err := a.serverService.GetDb()
+	if err != nil {
+		jsonMsg(c, "get Database", err)
+		return
+	}
+
+	filename := "x-ui.db"
+
+	if !filenameRegex.MatchString(filename) {
+		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("invalid filename"))
+		return
+	}
+
+	// Set the headers for the response
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+
+	// Write the file contents to the response
+	c.Writer.Write(db)
+}
+
+func (a *ServerController) importDB(c *gin.Context) {
+	// Get the file from the request body
+	file, _, err := c.Request.FormFile("db")
+	if err != nil {
+		jsonMsg(c, "Error reading db file", err)
+		return
+	}
+	defer file.Close()
+	defer func() {
+		a.lastGetStatusTime = time.Now()
+	}()
+	// Import it
+	err = a.serverService.ImportDB(file)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, "Import DB", nil)
+}
+
+func (a *ServerController) getNewX25519Cert(c *gin.Context) {
+	cert, err := a.serverService.GetNewX25519Cert()
+	if err != nil {
+		jsonMsg(c, "get x25519 certificate", err)
+		return
+	}
+	jsonObj(c, cert, nil)
+}
+
+func (a *ServerController) getNewmldsa65(c *gin.Context) {
+	cert, err := a.serverService.GetNewmldsa65()
+	if err != nil {
+		jsonMsg(c, "get mldsa65 certificate", err)
+		return
+	}
+	jsonObj(c, cert, nil)
+}
+
+func (a *ServerController) getNewEchCert(c *gin.Context) {
+	sni := c.PostForm("sni")
+	cert, err := a.serverService.GetNewEchCert(sni)
+	if err != nil {
+		jsonMsg(c, "get ech certificate", err)
+		return
+	}
+	jsonObj(c, cert, nil)
+}
+
+func (a *ServerController) getNewSelfSignedCert(c *gin.Context) {
+	sni := c.PostForm("sni")
+	cert, err := network.GenerateSelfSignedCert(sni)
+	if err != nil {
+		jsonMsg(c, "generate self-signed certificate", err)
+		return
+	}
+	jsonObj(c, cert, nil)
+}
+
+func (a *ServerController) getCertHash(c *gin.Context) {
+	certFile := c.PostForm("certFile")
+	certContent := c.PostForm("certContent")
+	hashes, err := network.GetCertHash(certFile, certContent)
+	if err != nil {
+		jsonMsg(c, "get certificate hash", err)
+		return
+	}
+	jsonObj(c, hashes, nil)
+}
+
+func (a *ServerController) getMinecraftProfile(c *gin.Context) {
+	profile, err := a.serverService.GetMinecraftProfile(c.PostForm("username"))
+	if err != nil {
+		jsonMsg(c, "get Minecraft profile", err)
+		return
+	}
+	jsonObj(c, profile, nil)
+}
+
+func (a *ServerController) getTlsPing(c *gin.Context) {
+	domain := c.PostForm("domain")
+	port := c.PostForm("port")
+	tlsPing, err := network.GetTlsPing(domain, port)
+	if err != nil {
+		jsonMsg(c, "get tls ping", err)
+		return
+	}
+	jsonObj(c, tlsPing, nil)
+}
+
+func (a *ServerController) getNewVlessEnc(c *gin.Context) {
+	out, err := a.serverService.GetNewVlessEnc()
+	if err != nil {
+		jsonMsg(c, "Failed to generate vless encryption config", err)
+		return
+	}
+	jsonObj(c, out, nil)
+}

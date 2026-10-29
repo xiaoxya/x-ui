@@ -1,0 +1,347 @@
+name: Release X-UI
+
+on:
+  workflow_dispatch:
+    inputs:
+      docker:
+        description: Also build and push the Docker image, tagged with the branch name
+        type: boolean
+        default: false
+  release:
+    types: [published]
+  push:
+    branches:
+      - main
+    tags:
+      - "*.*.*"
+    paths:
+      - '.github/workflows/release.yml'
+      - '**.js'
+      - '**.css'
+      - '**.html'
+      - '**.sh'
+      - '**.go'
+      - '**.toml'
+      - '**.json'
+      - '**.woff2'
+      - 'go.mod'
+      - 'go.sum'
+      - 'x-ui.service'
+
+# A push to main only builds artifacts, so a newer push makes the older build
+# pointless. Tag and release runs upload to the release and are never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        platform:
+          - amd64
+          - arm64
+          - armv7
+          - armv6
+          - 386
+          - armv5
+          - s390x
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          # setup-go's cache key does not include the target platform, so every
+          # matrix job would share one entry holding only one platform's build
+          # cache. Each platform keeps its own below.
+          cache: false
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-release-${{ matrix.platform }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-release-${{ matrix.platform }}-${{ steps.go.outputs.go-version }}-
+
+      - name: Build x-ui
+        run: |
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=${{ matrix.platform }}
+          # Use Bootlin prebuilt cross-toolchains (musl 1.2.5 in stable series)
+          case "${{ matrix.platform }}" in
+            amd64) BOOTLIN_ARCH="x86-64" ;;
+            arm64) BOOTLIN_ARCH="aarch64" ;;
+            armv7) BOOTLIN_ARCH="armv7-eabihf"; export GOARCH=arm GOARM=7 ;;
+            armv6) BOOTLIN_ARCH="armv6-eabihf"; export GOARCH=arm GOARM=6 ;;
+            armv5) BOOTLIN_ARCH="armv5-eabi"; export GOARCH=arm GOARM=5 ;;
+            386) BOOTLIN_ARCH="x86-i686" ;;
+            s390x) BOOTLIN_ARCH="s390x-z13" ;;
+          esac
+          echo "Resolving Bootlin musl toolchain for arch=$BOOTLIN_ARCH (platform=${{ matrix.platform }})"
+          TARBALL_BASE="https://toolchains.bootlin.com/downloads/releases/toolchains/$BOOTLIN_ARCH/tarballs/"
+          TARBALL_URL=$(curl -fsSL "$TARBALL_BASE" | grep -oE "${BOOTLIN_ARCH}--musl--stable-[^\"]+\\.tar\\.xz" | sort -r | head -n1)
+          [ -z "$TARBALL_URL" ] && { echo "Failed to locate Bootlin musl toolchain for arch=$BOOTLIN_ARCH" >&2; exit 1; }
+          echo "Downloading: $TARBALL_URL"
+          cd /tmp
+          curl -fL -sS -o "$(basename "$TARBALL_URL")" "$TARBALL_BASE/$TARBALL_URL"
+          tar -xf "$(basename "$TARBALL_URL")"
+          TOOLCHAIN_DIR=$(find . -maxdepth 1 -type d -name "${BOOTLIN_ARCH}--musl--stable-*" | head -n1)
+          export PATH="$(realpath "$TOOLCHAIN_DIR")/bin:$PATH"
+          export CC=$(realpath "$(find "$TOOLCHAIN_DIR/bin" -name '*-gcc.br_real' -type f -executable | head -n1)")
+          [ -z "$CC" ] && { echo "No gcc.br_real found in $TOOLCHAIN_DIR/bin" >&2; exit 1; }
+          cd -
+          go build -ldflags "-w -s -linkmode external -extldflags '-static'" -o xui-release -v main.go
+          file xui-release
+          ldd xui-release || echo "Static binary confirmed"
+          
+          mkdir x-ui
+          cp xui-release x-ui/
+          cp x-ui.service x-ui/
+          cp x-ui.sh x-ui/
+          mv x-ui/xui-release x-ui/x-ui
+          mkdir x-ui/bin
+          cd x-ui/bin
+          
+          # Download dependencies
+          Xray_URL="https://github.com/XTLS/Xray-core/releases/download/v26.10.21/"
+          if [ "${{ matrix.platform }}" == "amd64" ]; then
+            wget -q ${Xray_URL}Xray-linux-64.zip
+            unzip Xray-linux-64.zip
+            rm -f Xray-linux-64.zip
+          elif [ "${{ matrix.platform }}" == "arm64" ]; then
+            wget -q ${Xray_URL}Xray-linux-arm64-v8a.zip
+            unzip Xray-linux-arm64-v8a.zip
+            rm -f Xray-linux-arm64-v8a.zip
+          elif [ "${{ matrix.platform }}" == "armv7" ]; then
+            wget -q ${Xray_URL}Xray-linux-arm32-v7a.zip
+            unzip Xray-linux-arm32-v7a.zip
+            rm -f Xray-linux-arm32-v7a.zip
+          elif [ "${{ matrix.platform }}" == "armv6" ]; then
+            wget -q ${Xray_URL}Xray-linux-arm32-v6.zip
+            unzip Xray-linux-arm32-v6.zip
+            rm -f Xray-linux-arm32-v6.zip
+          elif [ "${{ matrix.platform }}" == "386" ]; then
+            wget -q ${Xray_URL}Xray-linux-32.zip
+            unzip Xray-linux-32.zip
+            rm -f Xray-linux-32.zip
+          elif [ "${{ matrix.platform }}" == "armv5" ]; then
+            wget -q ${Xray_URL}Xray-linux-arm32-v5.zip
+            unzip Xray-linux-arm32-v5.zip
+            rm -f Xray-linux-arm32-v5.zip
+          elif [ "${{ matrix.platform }}" == "s390x" ]; then
+            wget -q ${Xray_URL}Xray-linux-s390x.zip
+            unzip Xray-linux-s390x.zip
+            rm -f Xray-linux-s390x.zip
+          fi
+          rm -f geoip.dat geosite.dat
+          wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+          wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+          wget -q -O geoip_IR.dat https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat
+          wget -q -O geosite_IR.dat https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat
+          mv xray xray-linux-${{ matrix.platform }}
+          cd ../..
+          
+      # Only main saves, so tag runs reuse its caches instead of filling the
+      # cache storage with entries no later run can restore.
+      - name: Save Go cache
+        if: github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - name: Package
+        run: tar -zcvf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui
+
+      - name: Upload files to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: x-ui-linux-${{ matrix.platform }}
+          path: ./x-ui-linux-${{ matrix.platform }}.tar.gz
+
+      - name: Upload files to GH release
+        uses: svenstaro/upload-release-action@v2
+        if: |
+          (github.event_name == 'release' && github.event.action == 'published') ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          file: x-ui-linux-${{ matrix.platform }}.tar.gz
+          asset_name: x-ui-linux-${{ matrix.platform }}.tar.gz
+          overwrite: true
+          prerelease: true
+
+  # =================================
+  #  Windows Build
+  # =================================
+  build-windows:
+    name: Build for Windows
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        platform:
+          - amd64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build X-UI for Windows
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED="1"
+          $env:GOOS="windows"
+          $env:GOARCH="amd64"
+          go build -ldflags "-w -s" -o xui-release.exe -v main.go
+          
+          mkdir x-ui
+          Copy-Item xui-release.exe x-ui\
+          mkdir x-ui\bin
+          cd x-ui\bin
+          
+          # Download Xray for Windows
+          $Xray_URL = "https://github.com/XTLS/Xray-core/releases/download/v26.10.21/"
+          Invoke-WebRequest -Uri "${Xray_URL}Xray-windows-64.zip" -OutFile "Xray-windows-64.zip"
+          Expand-Archive -Path "Xray-windows-64.zip" -DestinationPath .
+          Remove-Item "Xray-windows-64.zip"
+          Remove-Item geoip.dat, geosite.dat -ErrorAction SilentlyContinue
+          Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" -OutFile "geoip.dat"
+          Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" -OutFile "geosite.dat"
+          Invoke-WebRequest -Uri "https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat" -OutFile "geoip_IR.dat"
+          Invoke-WebRequest -Uri "https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat" -OutFile "geosite_IR.dat"
+          Rename-Item xray.exe xray-windows-amd64.exe
+          cd ..
+          Copy-Item -Path ..\windows_files\* -Destination . -Recurse
+          cd ..
+
+      - name: Package to Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path .\x-ui -DestinationPath "x-ui-windows-amd64.zip"
+
+      - name: Upload files to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: x-ui-windows-amd64
+          path: ./x-ui-windows-amd64.zip
+
+      - name: Upload files to GH release
+        uses: svenstaro/upload-release-action@v2
+        if: |
+          (github.event_name == 'release' && github.event.action == 'published') ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          file: x-ui-windows-amd64.zip
+          asset_name: x-ui-windows-amd64.zip
+          overwrite: true
+          prerelease: true
+
+  # =================================
+  #  Docker Image
+  # =================================
+  # The image packages the static binaries the build job produced. Building
+  # from source here would compile every platform under QEMU emulation, which
+  # takes the better part of an hour.
+  docker:
+    name: Docker image
+    needs: build
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.docker)
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: x-ui-linux-*
+          path: artifacts
+
+      # Lays out one directory per image platform; Dockerfile.release finds it
+      # as TARGETARCH followed by TARGETVARIANT (amd64, arm64, armv7, armv6,
+      # 386). The panel runs xray-linux-<GOARCH>, and GOARCH is "arm" for every
+      # 32-bit ARM variant.
+      - name: Prepare image contents
+        run: |
+          for platform in amd64 arm64 armv7 armv6 386; do
+            dir=docker-dist/$platform
+            mkdir -p "$dir"
+            tar -xzf "artifacts/x-ui-linux-$platform/x-ui-linux-$platform.tar.gz" -C "$dir" --strip-components=1 x-ui/x-ui x-ui/bin
+            case "$platform" in
+              armv7 | armv6) mv "$dir/bin/xray-linux-$platform" "$dir/bin/xray-linux-arm" ;;
+            esac
+            rm -f "$dir/bin/LICENSE" "$dir/bin/README.md"
+          done
+          find docker-dist -type f | sort
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            alireza7/x-ui
+            ghcr.io/alireza0/x-ui
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=pep440,pattern={{version}}
+
+      # Still needed: the image's apk step runs on each target platform.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-dist
+          file: Dockerfile.release
+          push: true
+          platforms: linux/amd64, linux/arm64, linux/arm/v7, linux/arm/v6, linux/386
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
