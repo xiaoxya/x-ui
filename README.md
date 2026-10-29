@@ -2,6 +2,21 @@
 
 ## 安装教程
 
+### 下载 GitHub 构建包
+
+在仓库的 **Actions → Build installation packages** 中打开成功的运行记录，下载与服务器架构匹配的 `x-ui-linux-amd64` 或 `x-ui-linux-arm64` 产物。产物保留 30 天；私有仓库需要有访问权限的账号登录下载。解压下载得到的 ZIP 后，验证并解压其中的安装包，例如 AMD64：
+
+```bash
+sha256sum -c x-ui-linux-amd64.tar.gz.sha256
+tar -xzf x-ui-linux-amd64.tar.gz
+sudo ./xui-package/xui-upgrade -install -package "$(pwd)/xui-package" -port 2053
+sudo cat /etc/x-ui/initial-credentials
+```
+
+构建使用 Ubuntu 22.04 的 glibc，目标服务器需要兼容该版本，并使用 systemd。构建包包含官方 Xray 和所需数据，校验和只能检测文件变化。安装位置、端口和凭据说明见下文。
+
+### 从源码构建
+
 以下步骤适用于全新安装到使用 systemd 的 Linux 服务器。构建机器需要 Go（版本符合 `go.mod` 的要求）、GCC、Bash 和 `sha256sum`。构建机器与目标服务器须使用相同的 CPU 架构；当前构建产物依赖系统 glibc，建议在与目标服务器相同或较旧的兼容系统上构建。
 
 1. 获取源码，并从 [Xray 官方发布页](https://github.com/XTLS/Xray-core/releases)准备适合目标架构的 Xray 可执行文件，以及 `geoip.dat` 和 `geosite.dat`。以下路径需要替换为实际路径：

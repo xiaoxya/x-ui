@@ -1,0 +1,92 @@
+name: Build installation packages
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-package-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  xray-version:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Resolve official Xray release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          tag=$(gh api repos/XTLS/Xray-core/releases/latest --jq '.tag_name')
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid Xray release tag' >&2; exit 1; }
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'Xray release: %s\n' "$tag"
+
+  build:
+    needs: xray-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+            asset: Xray-linux-64.zip
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            asset: Xray-linux-arm64-v8a.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Download and verify official Xray
+        env:
+          GH_TOKEN: ${{ github.token }}
+          XRAY_TAG: ${{ needs.xray-version.outputs.tag }}
+          XRAY_ASSET: ${{ matrix.asset }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/xray-assets"
+          metadata=$(gh api "repos/XTLS/Xray-core/releases/tags/$XRAY_TAG" --jq '.assets[] | select(.name == env.XRAY_ASSET) | .digest')
+          [[ "$metadata" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Missing Xray SHA-256 digest' >&2; exit 1; }
+          gh release download "$XRAY_TAG" --repo XTLS/Xray-core --pattern "$XRAY_ASSET" --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' "${metadata#sha256:}" "$RUNNER_TEMP/$XRAY_ASSET" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/$XRAY_ASSET" -d "$RUNNER_TEMP/xray-assets"
+          chmod +x "$RUNNER_TEMP/xray-assets/xray"
+      - name: Build installation package
+        run: |
+          set -Eeuo pipefail
+          bash deployment/build-local.sh "$RUNNER_TEMP/xui-package" "$RUNNER_TEMP/xray-assets/xray" "$RUNNER_TEMP/xray-assets"
+      - name: Verify package startup
+        env:
+          XUI_PACKAGE_TEST_DIR: ${{ runner.temp }}/xui-package
+        run: go test ./deployment -run '^TestLocalPackageBoot$' -count=1 -v
+      - name: Archive package
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p dist
+          tar -C "$RUNNER_TEMP" -czf "dist/x-ui-linux-$PACKAGE_ARCH.tar.gz" xui-package
+          cd dist
+          sha256sum "x-ui-linux-$PACKAGE_ARCH.tar.gz" > "x-ui-linux-$PACKAGE_ARCH.tar.gz.sha256"
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-ui-linux-${{ matrix.arch }}
+          path: |
+            dist/x-ui-linux-${{ matrix.arch }}.tar.gz
+            dist/x-ui-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
