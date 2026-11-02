@@ -1852,6 +1852,22 @@ class Outbound extends CommonClass {
         }
     }
 
+    get freedomStrategy() {
+        const target = this.targetStrategy;
+        const legacy = this.settings?.targetStrategy || this.settings?.domainStrategy;
+        return (target && target.toLowerCase() !== 'asis' ? target : null) ||
+            (legacy && legacy.toLowerCase() !== 'asis' ? legacy : null) ||
+            this.stream?.sockopt?.domainStrategy || 'AsIs';
+    }
+
+    set freedomStrategy(value) {
+        if (!this.stream.sockopt) this.stream.sockopt = new SockoptStreamSettings();
+        this.stream.sockopt.domainStrategy = value;
+        this.settings.domainStrategy = '';
+        this.settings.targetStrategy = '';
+        this.targetStrategy = '';
+    }
+
     canEnableTls() {
         if ([Protocols.Hysteria, Protocols.Masque].includes(this.protocol)) return true;
         if (![Protocols.VMess, Protocols.VLESS, Protocols.Trojan, Protocols.Shadowsocks, Protocols.Hysteria].includes(this.protocol)) return false;
@@ -2221,18 +2237,21 @@ Outbound.FreedomSettings = class extends CommonClass {
     }
 
     static fromJson(json = {}) {
-        return new Outbound.FreedomSettings(
+        const settings = new Outbound.FreedomSettings(
             json.domainStrategy,
             json.redirect,
             json.fragment ? Outbound.FreedomSettings.Fragment.fromJson(json.fragment) : undefined,
             json.noises ? json.noises.map(noise => Outbound.FreedomSettings.Noise.fromJson(noise)) : undefined,
             json.finalRules ? json.finalRules.map(rule => Outbound.FreedomSettings.FinalRule.fromJson(rule)) : undefined,
         );
+        settings.targetStrategy = json.targetStrategy || '';
+        return settings;
     }
 
     toJson() {
         return {
             domainStrategy: CommonClass.shrinkObject(this.domainStrategy),
+            targetStrategy: CommonClass.shrinkObject(this.targetStrategy),
             redirect: CommonClass.shrinkObject(this.redirect),
             fragment: CommonClass.shrinkObject(this.fragment),
             noises: this.noises.length === 0 ? undefined : Outbound.FreedomSettings.Noise.toJsonArray(this.noises),

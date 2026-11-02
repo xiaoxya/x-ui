@@ -14,7 +14,7 @@
         <a-form-item label='{{ i18n "pages.xray.outbound.sendThrough" }}'>
             <a-input v-model="outbound.sendThrough"></a-input>
         </a-form-item>
-        <a-form-item label='{{ i18n "pages.xray.outbound.targetStrategy" }}'>
+        <a-form-item v-if="outbound.protocol !== Protocols.Freedom" label='{{ i18n "pages.xray.outbound.targetStrategy" }}'>
             <a-select v-model="outbound.targetStrategy" :dropdown-class-name="themeSwitcher.currentTheme">
                 <a-select-option value="">{{ i18n "none" }}</a-select-option>
                 <a-select-option v-for="s in OutboundDomainStrategies" :value="s">[[ s ]]</a-select-option>
@@ -27,7 +27,7 @@
 <!-- freedom settings-->
 <template v-if="outbound.protocol === Protocols.Freedom">
     <a-form-item label='{{ i18n "pages.outbounds.strategy" }}'>
-      <a-select v-model="outbound.settings.domainStrategy" :dropdown-class-name="themeSwitcher.currentTheme">
+      <a-select v-model="outbound.freedomStrategy" :dropdown-class-name="themeSwitcher.currentTheme">
         <a-select-option v-for="s in OutboundDomainStrategies" :value="s">[[ s ]]</a-select-option>
       </a-select>
     </a-form-item>

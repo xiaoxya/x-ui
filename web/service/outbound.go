@@ -215,11 +215,15 @@ func (s *OutboundService) GetOutboundSummariesJSON() (string, error) {
 		if len(o.Settings) > 0 {
 			json.Unmarshal([]byte(o.Settings), &settings)
 		}
+		var stream interface{}
+		if len(o.StreamSettings) > 0 {
+			json.Unmarshal([]byte(o.StreamSettings), &stream)
+		}
 		summaries = append(summaries, map[string]interface{}{
-			"id":       o.Id,
-			"tag":      o.Tag,
-			"protocol": o.Protocol,
-			"settings": settings,
+			"id": o.Id, "tag": o.Tag, "protocol": o.Protocol,
+			"settings": settings, "streamSettings": stream,
+			"sendThrough": o.SendThrough, "proxySettings": o.ProxySettings,
+			"mux": o.Mux, "targetStrategy": o.TargetStrategy,
 		})
 	}
 	result, _ := json.Marshal(summaries)

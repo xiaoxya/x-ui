@@ -42,6 +42,13 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 			level := matches[2]
 			msgBody := matches[3]
 			msgBodyLower := strings.ToLower(msgBody)
+			// Xray emits its successful startup announcement at warning level.
+			// Limit the override to that exact message, retaining real warnings.
+			if level == "Warning" && regexp.MustCompile(`^core: Xray [^ ]+ started$`).MatchString(msgBody) {
+				logger.Info("XRAY: " + msgBody)
+				lw.lastLine = ""
+				continue
+			}
 
 			if strings.Contains(msgBodyLower, "tls handshake error") ||
 				strings.Contains(msgBodyLower, "connection ends") {

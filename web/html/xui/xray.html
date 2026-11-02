@@ -556,9 +556,8 @@
             ipv4Settings: {
                 tag: "IPv4",
                 protocol: "freedom",
-                settings: {
-                    domainStrategy: "UseIPv4"
-                }
+                settings: {},
+                streamSettings: {sockopt: {domainStrategy: "UseIPv4"}}
             },
             directSettings: {
                 tag: "direct",
@@ -1168,18 +1167,30 @@
             freedomStrategy: {
                 get: function () {
                     const freedomOutbound = this.loadedOutbounds.find((o) => o.protocol === "freedom" && o.tag == "direct");
-                    if (!freedomOutbound || !freedomOutbound.settings || !freedomOutbound.settings.domainStrategy) return "AsIs";
-                    return freedomOutbound.settings.domainStrategy;
+                    if (!freedomOutbound) return "AsIs";
+                    const target = freedomOutbound.targetStrategy;
+                    const legacy = freedomOutbound.settings?.targetStrategy || freedomOutbound.settings?.domainStrategy;
+                    return (target && target.toLowerCase() !== "asis" ? target : null) ||
+                        (legacy && legacy.toLowerCase() !== "asis" ? legacy : null) ||
+                        freedomOutbound.streamSettings?.sockopt?.domainStrategy || "AsIs";
                 },
                 set: function (newValue) {
                     const freedomOutbound = this.loadedOutbounds.find((o) => o.protocol === "freedom" && o.tag == "direct");
                     if (!freedomOutbound) return;
-                    const settings = freedomOutbound.settings || {};
-                    settings.domainStrategy = newValue;
+                    const settings = { ...(freedomOutbound.settings || {}) };
+                    delete settings.domainStrategy;
+                    delete settings.targetStrategy;
+                    const stream = { ...(freedomOutbound.streamSettings || {}) };
+                    stream.sockopt = { ...(stream.sockopt || {}), domainStrategy: newValue };
                     const data = {
                         protocol: freedomOutbound.protocol,
                         tag: freedomOutbound.tag,
                         settings: JSON.stringify(settings, null, 2),
+                        streamSettings: JSON.stringify(stream, null, 2),
+                        sendThrough: freedomOutbound.sendThrough,
+                        proxySettings: freedomOutbound.proxySettings,
+                        mux: freedomOutbound.mux,
+                        targetStrategy: "",
                     };
                     HttpUtil.post(`/xui/outbound/update/${freedomOutbound.id}`, data).then(() => this.getXraySetting());
                 }

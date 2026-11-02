@@ -243,6 +243,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 
 func normalizedOutboundConfig(outbound *model.Outbound) (*xray.OutboundConfig, error) {
 	config := outbound.GenXrayOutboundConfig()
+	if err := xray.NormalizeFreedomStrategy(config); err != nil {
+		return nil, fmt.Errorf("outbound %q: %w", outbound.Tag, err)
+	}
 	stream, err := xray.NormalizeOutboundTLS(config.StreamSettings)
 	if err != nil {
 		return nil, fmt.Errorf("outbound %q: %w", outbound.Tag, err)

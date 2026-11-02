@@ -128,10 +128,11 @@ func outboundFromMap(raw map[string]interface{}, sort int) *model.Outbound {
 func defaultOutbounds() []*model.Outbound {
 	return []*model.Outbound{
 		{
-			Sort:     0,
-			Protocol: "freedom",
-			Tag:      "direct",
-			Settings: `{"domainStrategy":"UseIP","noises":[],"redirect":""}`,
+			Sort:           0,
+			Protocol:       "freedom",
+			Tag:            "direct",
+			Settings:       `{"noises":[],"redirect":""}`,
+			StreamSettings: `{"sockopt":{"domainStrategy":"UseIP"}}`,
 		},
 		{
 			Sort:     1,
