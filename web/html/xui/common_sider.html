@@ -61,6 +61,15 @@
     {{template "menuItems" .}}
 </a-drawer>
 <script>
+    window.shouldShowInsecurePanelAlert = function () {
+        if (window.location.protocol === 'https:') return false;
+        try { return sessionStorage.getItem('xui-insecure-alert-dismissed') !== '1'; }
+        catch (_) { return true; }
+    };
+    window.dismissInsecurePanelAlert = function () {
+        try { sessionStorage.setItem('xui-insecure-alert-dismissed', '1'); }
+        catch (_) { /* Storage can be disabled in the browser. */ }
+    };
     const siderDrawer = {
         visible: false,
         show() {

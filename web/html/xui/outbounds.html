@@ -54,7 +54,7 @@
                     <a-alert type="error" v-if="showAlert" style="margin-bottom: 10px"
                         message='{{ i18n "secAlertTitle" }}'
                         description='{{ i18n "secAlertSsl" }}'
-                        show-icon closable>
+                        show-icon closable @close="dismissInsecurePanelAlert">
                     </a-alert>
                 </transition>
                 <transition name="list" appear>
@@ -349,6 +349,7 @@
             testingAll: false,
         },
         methods: {
+            dismissInsecurePanelAlert: window.dismissInsecurePanelAlert,
             loading(spinning = true) { this.spinning = spinning; },
             async getDBOutbounds() {
                 this.refreshing = true;
@@ -655,9 +656,7 @@
             },
         },
         mounted() {
-            if (window.location.protocol !== "https:") {
-                this.showAlert = true;
-            }
+            this.showAlert = window.shouldShowInsecurePanelAlert();
             window.addEventListener('resize', this.onResize);
             this.onResize();
             this.loading();

@@ -69,7 +69,7 @@
                     message='{{ i18n "secAlertTitle" }}'
                     color="red"
                     description='{{ i18n "secAlertSsl" }}'
-                    show-icon closable
+                    show-icon closable @close="dismissInsecurePanelAlert"
                     >
                     </a-alert>
                 </transition>
@@ -628,6 +628,7 @@
             }
         },
         methods: {
+            dismissInsecurePanelAlert: window.dismissInsecurePanelAlert,
             loading(spinning = true) {
                 this.spinning = spinning;
             },
@@ -1011,9 +1012,7 @@
             },
         },
         async mounted() {
-            if (window.location.protocol !== "https:") {
-                this.showAlert = true;
-            }
+            this.showAlert = window.shouldShowInsecurePanelAlert();
             await this.getXraySetting();
             await this.getXrayResult();
             while (true) {

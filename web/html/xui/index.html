@@ -30,7 +30,7 @@
                 message='{{ i18n "secAlertTitle" }}'
                 color="red"
                 description='{{ i18n "secAlertSsl" }}'
-                show-icon closable
+                show-icon closable @close="dismissInsecurePanelAlert"
                 >
                 </a-alert>
             </transition>
@@ -548,6 +548,7 @@
             showAlert: false,
         },
         methods: {
+            dismissInsecurePanelAlert: window.dismissInsecurePanelAlert,
             loading(spinning, tip = '{{ i18n "loading"}}') {
                 this.spinning = spinning;
                 this.loadingTip = tip;
@@ -687,9 +688,7 @@
             },
         },
         async mounted() {
-            if (window.location.protocol !== "https:") {
-                this.showAlert = true;
-            }
+            this.showAlert = window.shouldShowInsecurePanelAlert();
             let portHopPoll = 0;
             while (true) {
                 try {

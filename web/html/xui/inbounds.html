@@ -74,7 +74,7 @@
                     message='{{ i18n "secAlertTitle" }}'
                     color="red"
                     description='{{ i18n "secAlertSsl" }}'
-                    show-icon closable
+                    show-icon closable @close="dismissInsecurePanelAlert"
                     >
                     </a-alert>
                 </transition>
@@ -655,6 +655,7 @@
             iplimitSupported: '{{ .iplimitSupported }}' === 'true',
         },
         methods: {
+            dismissInsecurePanelAlert: window.dismissInsecurePanelAlert,
             loading(spinning = true) {
                 this.spinning = spinning;
             },
@@ -1413,9 +1414,7 @@
             }, 500)
         },
         mounted() {
-            if (window.location.protocol !== "https:") {
-                this.showAlert = true;
-            }
+            this.showAlert = window.shouldShowInsecurePanelAlert();
             window.addEventListener('resize', this.onResize);
             this.onResize();
             this.loading();
