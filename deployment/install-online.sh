@@ -3,8 +3,9 @@ set -Eeuo pipefail
 
 usage() {
     cat <<'USAGE'
-用法：bash install-online.sh [--port 端口] [--version 版本] [--download-only]
+用法：bash install-online.sh [--port 端口 | --upgrade] [--version 版本] [--download-only]
 默认下载最新正式发行版，面板端口为 2053。
+--upgrade 使用下载的安装包升级已有面板，不改变面板端口。
 --download-only 只下载和校验安装包，不修改系统。
 USAGE
 }
@@ -12,17 +13,24 @@ USAGE
 port=2053
 version=''
 download_only=0
+upgrade=0
+port_specified=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --port|--version)
             [[ $# -ge 2 && -n "$2" ]] || { usage >&2; exit 2; }
-            if [[ $1 == --port ]]; then port=$2; else version=$2; fi
+            if [[ $1 == --port ]]; then port=$2; port_specified=1; else version=$2; fi
             shift 2 ;;
         --download-only) download_only=1; shift ;;
+        --upgrade) upgrade=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
+if (( upgrade && port_specified )); then
+    printf '升级保留已有端口，请不要同时指定 --port。\n' >&2
+    exit 2
+fi
 if [[ ! $port =~ ^[1-9][0-9]{0,4}$ ]] || (( port > 65535 )); then
     printf '无效端口，请输入 1 到 65535 之间的整数。\n' >&2
     exit 2
@@ -77,6 +85,20 @@ if [[ ! -f $installer || ! -x $installer || -L $installer ]]; then
 fi
 printf '安装包已保存到：%s\n' "$work_dir/xui-package"
 if (( download_only )); then exit 0; fi
+if (( upgrade )); then
+    manager="$work_dir/xui-package/xui-manage-local"
+    if [[ ! -f $manager || ! -x $manager || -L $manager ]]; then
+        printf '安装包缺少有效的升级工具。\n' >&2
+        exit 1
+    fi
+    if (( EUID == 0 )); then
+        "$manager" upgrade "$work_dir/xui-package"
+    else
+        sudo "$manager" upgrade "$work_dir/xui-package"
+    fi
+    printf '升级完成。\n'
+    exit 0
+fi
 if (( EUID == 0 )); then
     "$installer" "$port"
 else

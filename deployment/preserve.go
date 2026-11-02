@@ -27,8 +27,8 @@ func validateExistingTree(root string) error {
 }
 
 // Keep local files absent from the new package and panel-managed Xray data
-// files. Staging is on the same filesystem as the old installation, so links
-// preserve their mode, owner and contents without copying mutable state.
+// files. Independent copies keep later writes from changing the retained old
+// installation, which is needed for rollback.
 func preserveExistingFiles(source, stage string) error {
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -76,7 +76,10 @@ func preserveExistingFiles(source, stage string) error {
 		} else if !os.IsNotExist(e) {
 			return e
 		}
-		return os.Link(path, target)
+		if err = atomicCopy(path, target, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return preserveFileOwner(info, target)
 	})
 	if err != nil {
 		return err

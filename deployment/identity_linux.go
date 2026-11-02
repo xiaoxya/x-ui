@@ -22,3 +22,19 @@ func directoryIdentity(path string) (uint64, uint64, error) {
 	}
 	return uint64(stat.Dev), stat.Ino, nil
 }
+
+func preserveFileOwner(source os.FileInfo, target string) error {
+	stat, ok := source.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("file ownership unavailable")
+	}
+	if err := os.Chown(target, int(stat.Uid), int(stat.Gid)); err != nil {
+		return err
+	}
+	f, err := os.Open(target)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}

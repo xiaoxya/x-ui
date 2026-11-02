@@ -101,6 +101,9 @@ func TestUpgradeSuccessAndRollback(t *testing.T) {
 			if fail && scenario != "sidecar-failure" {
 				svc.onStart = func() {
 					svc.onStart = nil
+					if e := os.WriteFile(filepath.Join(o.InstallDir, "cert/custom.pem"), []byte("modified-by-new-service"), 0600); e != nil {
+						t.Error(e)
+					}
 					if e := os.WriteFile(filepath.Join(o.InstallDir, "new-runtime-file"), []byte("new user data"), 0600); e != nil {
 						t.Error(e)
 					}

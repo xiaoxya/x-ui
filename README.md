@@ -83,6 +83,31 @@ sudo cat /etc/x-ui/initial-credentials
 
 面板程序默认安装在 `/usr/local/x-ui/`，数据库位于 `/etc/x-ui/x-ui.db`。
 
+### 升级与中断恢复
+
+已使用本项目标准 systemd 服务安装的面板，可下载最新发行版并升级：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xiaoxya/x-ui/main/deployment/install-online.sh | bash -s -- --upgrade
+```
+
+升级沿用现有端口和设置，执行前会保存数据库快照及原安装目录；启动或健康检查失败时尝试回滚。升级前请另行备份重要数据。可使用 `--version v0.1.1` 指定发行版；`--upgrade` 不能与 `--port` 同时使用。自定义 systemd 服务需要先手动迁移，升级工具会拒绝不支持的服务配置。
+
+也可先下载并校验安装包，再使用输出的安装包目录升级：
+
+```bash
+sudo /path/to/xui-package/xui-manage-local upgrade /path/to/xui-package
+```
+
+安装或升级被中断、提示存在未完成的事务时，使用保留的安装包执行恢复，再检查服务状态：
+
+```bash
+sudo /path/to/xui-package/xui-manage-local recover /path/to/xui-package
+sudo x-ui status
+```
+
+将 `/path/to/xui-package` 替换为脚本输出的实际目录。若恢复失败，请保留安装包、事务记录和提示的备份文件，以便排查。
+
 ## 原项目与许可
 
 本项目修改自 [alireza0/x-ui](https://github.com/alireza0/x-ui)，保留原项目的版权声明，并遵循 GNU General Public License v3.0。完整许可见 [LICENSE](LICENSE)。
